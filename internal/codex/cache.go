@@ -1,12 +1,15 @@
 package codex
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
+
+	"codex-lover/internal/model"
 )
 
 func CacheHomeAuth(cacheRoot string, profileID string, homePath string) error {
@@ -54,6 +57,68 @@ func RestoreCachedHomeAuth(cacheRoot string, profileID string, homePath string) 
 		return fmt.Errorf("restore Codex auth: %w", err)
 	}
 	return nil
+}
+
+func DeleteCachedHomeAuth(cacheRoot string, profileID string) error {
+	target := cachedAuthPath(cacheRoot, profileID)
+	if err := os.Remove(target); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete cached Codex auth: %w", err)
+	}
+	return nil
+}
+
+func LoadCachedProfileAuth(cacheRoot string, profileID string) (*ProfileAuth, error) {
+	authPath := cachedAuthPath(cacheRoot, profileID)
+	data, err := os.ReadFile(authPath)
+	if err != nil {
+		return nil, fmt.Errorf("read cached Codex auth: %w", err)
+	}
+
+	var authFile AuthFile
+	if err := json.Unmarshal(data, &authFile); err != nil {
+		return nil, fmt.Errorf("parse cached Codex auth: %w", err)
+	}
+	if authFile.Tokens == nil || authFile.Tokens.AccessToken == "" {
+		return nil, fmt.Errorf("%s does not contain ChatGPT tokens", authPath)
+	}
+
+	claims, err := ParseIDClaims(authFile.Tokens.IDToken)
+	if err != nil {
+		return nil, err
+	}
+
+	accountID := authFile.Tokens.AccountID
+	if accountID == "" {
+		accountID = claims.ChatGPTAccountID
+	}
+
+	return &ProfileAuth{
+		HomePath:     filepath.Dir(authPath),
+		AccessToken:  authFile.Tokens.AccessToken,
+		RefreshToken: authFile.Tokens.RefreshToken,
+		AccountID:    accountID,
+		Email:        claims.Email,
+		Plan:         claims.ChatGPTPlanType,
+	}, nil
+}
+
+func FetchUsageFromCachedAuth(cacheRoot string, profileID string) (*model.UsageSnapshot, *ProfileAuth, error) {
+	authPath := cachedAuthPath(cacheRoot, profileID)
+	auth, err := LoadCachedProfileAuth(cacheRoot, profileID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	snapshot, authFile, err := fetchUsageWithRefresh(auth)
+	if err != nil {
+		return nil, nil, err
+	}
+	if authFile != nil {
+		if err := persistRefreshedTokensAtPath(authPath, authFile); err != nil {
+			return nil, nil, err
+		}
+	}
+	return snapshot, auth, nil
 }
 
 func cachedAuthPath(cacheRoot string, profileID string) string {
