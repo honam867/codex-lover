@@ -26,6 +26,12 @@ type SwitchResult struct {
 	To      model.Profile
 }
 
+type LogoutResult struct {
+	Profile         model.Profile
+	RemovedHomeAuth bool
+	RemovedCache    bool
+}
+
 func New(store *store.Store) *Service {
 	return &Service{store: store}
 }
@@ -147,6 +153,104 @@ func (s *Service) RefreshAll() ([]model.ProfileStatus, error) {
 
 func (s *Service) ProfileStatuses() ([]model.ProfileStatus, error) {
 	return s.store.ProfileStatuses()
+}
+
+func (s *Service) LogoutProfile(profileID string) (LogoutResult, error) {
+	statuses, err := s.store.ProfileStatuses()
+	if err != nil {
+		return LogoutResult{}, err
+	}
+
+	var selected model.ProfileStatus
+	found := false
+	for _, status := range statuses {
+		if status.Profile.ID == profileID {
+			selected = status
+			found = true
+			break
+		}
+	}
+	if !found {
+		return LogoutResult{}, fmt.Errorf("profile %q not found", profileID)
+	}
+
+	result := LogoutResult{Profile: selected.Profile}
+	if selected.Profile.Tool == model.ToolCodex && selected.State.AuthStatus == model.AuthStatusActive {
+		auth, err := codex.LoadProfileAuth(selected.Profile.HomePath)
+		if err == nil && profileMatchesAuth(selected.Profile, auth) {
+			if err := codex.DeleteHomeAuth(selected.Profile.HomePath); err != nil {
+				return result, err
+			}
+			result.RemovedHomeAuth = true
+		}
+	}
+
+	if codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), selected.Profile.ID) {
+		if err := codex.DeleteCachedHomeAuth(s.codexAuthCacheRoot(), selected.Profile.ID); err != nil {
+			return result, err
+		}
+		result.RemovedCache = true
+	}
+
+	if err := s.store.RemoveProfile(selected.Profile.ID); err != nil {
+		return result, err
+	}
+
+	return result, nil
+}
+
+func (s *Service) RefreshLoggedOutCachedUsage(statuses []model.ProfileStatus) ([]model.ProfileStatus, int, error) {
+	currentState, err := s.store.LoadState()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	refreshedCount := 0
+	for _, status := range statuses {
+		if status.Profile.Tool != model.ToolCodex {
+			continue
+		}
+		if status.State.AuthStatus != model.AuthStatusLoggedOut {
+			continue
+		}
+		if !codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), status.Profile.ID) {
+			continue
+		}
+
+		usage, auth, err := codex.FetchUsageFromCachedAuth(s.codexAuthCacheRoot(), status.Profile.ID)
+		if err != nil {
+			continue
+		}
+
+		now := time.Now().UTC()
+		state := hydrateProfileState(currentState.Profiles[status.Profile.ID], status.Profile.ID, now)
+		state.AuthStatus = model.AuthStatusLoggedOut
+		state.LastSeenLoggedOutAt = &now
+		state.Usage = usage
+		state.LastError = ""
+		if err := s.store.UpdateProfileState(status.Profile.ID, state); err != nil {
+			return nil, refreshedCount, err
+		}
+		currentState.Profiles[status.Profile.ID] = state
+		refreshedCount++
+
+		if auth != nil {
+			profile := status.Profile
+			profile.Email = chooseNonEmpty(auth.Email, profile.Email)
+			profile.AccountID = chooseNonEmpty(auth.AccountID, profile.AccountID)
+			profile.Plan = chooseNonEmpty(auth.Plan, profile.Plan)
+			profile.UpdatedAt = now
+			if err := s.store.UpsertProfile(profile); err != nil {
+				return nil, refreshedCount, err
+			}
+		}
+	}
+
+	updatedStatuses, err := s.store.ProfileStatuses()
+	if err != nil {
+		return nil, refreshedCount, err
+	}
+	return updatedStatuses, refreshedCount, nil
 }
 
 func (s *Service) SyncOpenCodeFromActiveCodex(statuses []model.ProfileStatus) (opencode.SyncResult, error) {

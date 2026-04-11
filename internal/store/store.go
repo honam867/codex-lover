@@ -125,6 +125,43 @@ func (s *Store) UpdateProfileState(profileID string, state model.ProfileState) e
 	return s.saveJSONUnlocked(s.statePath, current)
 }
 
+func (s *Store) RemoveProfile(profileID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	cfg, err := s.loadConfigUnlocked()
+	if err != nil {
+		return err
+	}
+	filteredProfiles := make([]model.Profile, 0, len(cfg.Profiles))
+	for _, profile := range cfg.Profiles {
+		if profile.ID == profileID {
+			continue
+		}
+		filteredProfiles = append(filteredProfiles, profile)
+	}
+	cfg.Profiles = filteredProfiles
+	if err := s.saveJSONUnlocked(s.configPath, cfg); err != nil {
+		return err
+	}
+
+	state, err := s.loadStateUnlocked()
+	if err != nil {
+		return err
+	}
+	delete(state.Profiles, profileID)
+	filteredSessions := make([]model.Session, 0, len(state.Sessions))
+	for _, session := range state.Sessions {
+		if session.ProfileID == profileID {
+			continue
+		}
+		filteredSessions = append(filteredSessions, session)
+	}
+	state.Sessions = filteredSessions
+	state.UpdatedAt = time.Now().UTC()
+	return s.saveJSONUnlocked(s.statePath, state)
+}
+
 func (s *Store) ProfileStatuses() ([]model.ProfileStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

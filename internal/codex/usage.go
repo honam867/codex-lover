@@ -201,6 +201,10 @@ func refreshAuth(auth *ProfileAuth) (*ProfileAuth, error) {
 
 func persistRefreshedTokens(homePath string, updated *AuthFile) error {
 	authPath := filepath.Join(homePath, authFileName)
+	return persistRefreshedTokensAtPath(authPath, updated)
+}
+
+func persistRefreshedTokensAtPath(authPath string, updated *AuthFile) error {
 	currentBytes, err := os.ReadFile(authPath)
 	if err != nil {
 		return fmt.Errorf("read auth for persist: %w", err)

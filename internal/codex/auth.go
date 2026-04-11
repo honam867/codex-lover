@@ -92,6 +92,14 @@ func LoadProfileAuth(homePath string) (*ProfileAuth, error) {
 	}, nil
 }
 
+func DeleteHomeAuth(homePath string) error {
+	authPath := filepath.Join(homePath, authFileName)
+	if err := os.Remove(authPath); err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("delete %s: %w", authPath, err)
+	}
+	return nil
+}
+
 func AuthFingerprint(auth *ProfileAuth) string {
 	if auth == nil {
 		return ""
