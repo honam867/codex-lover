@@ -2,7 +2,21 @@
 
 ![codex-lover cover](./docs/cover.png)
 
-`codex-lover` is a Windows-first desktop manager for multi-account `codex` usage.
+`codex-lover` is a Windows-first desktop manager for multi-account `codex` usage, quota tracking, account switching, and OpenCode sync.
+
+If you are searching for a tool related to:
+
+- Codex account manager
+- Codex multi-account manager
+- Codex quota tracker
+- Codex usage tracker
+- Codex auto switch account
+- Codex 5H limit monitor
+- Codex weekly limit monitor
+- OpenCode sync for Codex
+- Windows desktop app for Codex accounts
+
+this project is built for exactly that workflow.
 
 It exists to remove the repetitive, error-prone flow of:
 
@@ -13,7 +27,11 @@ It exists to remove the repetitive, error-prone flow of:
 - trying to keep `opencode` on the same account
 - remembering which logged-out account will reset next
 
-Instead, `codex-lover` keeps a local account registry, watches usage, syncs OpenCode, and can switch Codex to another cached account when the active one hits limit.
+Instead, `codex-lover` keeps a local account registry, tracks Codex usage, syncs OpenCode, and can switch Codex to another cached account when the active one hits the 5H or weekly limit.
+
+## SEO Summary
+
+`codex-lover` is a desktop app for managing multiple Codex accounts on Windows. It works as a Codex quota tracker, Codex usage monitor, Codex account switcher, and OpenCode sync helper. The app helps users monitor Codex 5H usage, weekly usage, active account state, logged-out accounts, cached quota, reset times, and automatic account switching when a Codex account reaches limit.
 
 ## Pain Points
 
@@ -36,6 +54,30 @@ Typical multi-account Codex usage has a few recurring problems:
 - notify when the active account reaches 20% and 10%
 - auto-switch to another cached account when the active account reaches limit
 - sync OpenCode to the active Codex account automatically
+
+## Keyword Focus
+
+Main keyword targets for this repository:
+
+- Codex account manager
+- Codex multi-account manager
+- Codex quota tracker
+- Codex usage tracker
+- Codex account switcher
+- Codex auto switch
+- Codex 5H limit tracker
+- Codex weekly limit tracker
+- OpenCode sync
+- Codex Windows desktop app
+
+Secondary keyword targets:
+
+- manage multiple Codex accounts
+- switch Codex account without logout
+- track logged-out Codex account usage
+- Codex quota dashboard
+- Codex account monitor
+- Codex OpenCode sync tool
 
 ## Core Features
 
