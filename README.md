@@ -1,5 +1,7 @@
 # codex-lover
 
+![codex-lover cover](./docs/cover.png)
+
 `codex-lover` is a Windows-first desktop manager for multi-account `codex` usage.
 
 It exists to remove the repetitive, error-prone flow of:
