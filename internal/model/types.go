@@ -97,3 +97,17 @@ type ProfileStatus struct {
 	Profile Profile      `json:"profile"`
 	State   ProfileState `json:"state"`
 }
+
+func (s ProfileState) UsageWindowPrimary() *UsageWindow {
+	if s.Usage == nil {
+		return nil
+	}
+	return s.Usage.Primary
+}
+
+func (s ProfileState) UsageWindowSecondary() *UsageWindow {
+	if s.Usage == nil {
+		return nil
+	}
+	return s.Usage.Secondary
+}

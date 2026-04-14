@@ -26,12 +26,60 @@ if ([string]::IsNullOrWhiteSpace($goExe)) {
     throw "Could not resolve the Go executable path."
 }
 
+$wailsCmd = Get-Command wails.exe -ErrorAction SilentlyContinue
+if (-not $wailsCmd) {
+    $wailsCmd = Get-Command wails -ErrorAction SilentlyContinue
+}
+if (-not $wailsCmd) {
+    $fallbackWails = Join-Path $env:USERPROFILE "go\bin\wails.exe"
+    if (Test-Path $fallbackWails) {
+        $wailsCmd = Get-Item $fallbackWails
+    }
+}
+
+$wailsExe = $null
+if ($wailsCmd) {
+    if ($wailsCmd.PSObject.Properties.Name -contains "Source") {
+        $wailsExe = $wailsCmd.Source
+    }
+    elseif ($wailsCmd.PSObject.Properties.Name -contains "FullName") {
+        $wailsExe = $wailsCmd.FullName
+    }
+}
+
 $binDir = Join-Path $env:LOCALAPPDATA "codex-lover\bin"
 New-Item -ItemType Directory -Force -Path $binDir | Out-Null
 
 $exePath = Join-Path $binDir "codex-lover.exe"
+$desktopExePath = Join-Path $binDir "codex-lover-desktop.exe"
 Push-Location $repoRoot
 try {
+    $desktopAppDir = Join-Path $repoRoot "desktop-app"
+    $desktopConfigPath = Join-Path $desktopAppDir "wails.json"
+    if (Test-Path $desktopConfigPath) {
+        if ([string]::IsNullOrWhiteSpace($wailsExe)) {
+            throw "Wails was not found. Install Wails, then run .\install.cmd again."
+        }
+
+        Push-Location $desktopAppDir
+        try {
+            & $wailsExe build -clean
+            if ($LASTEXITCODE -ne 0) {
+                throw "wails build failed with exit code $LASTEXITCODE"
+            }
+        }
+        finally {
+            Pop-Location
+        }
+
+        $desktopBuiltExe = Join-Path $desktopAppDir "build\bin\codex-lover-desktop.exe"
+        if (-not (Test-Path $desktopBuiltExe)) {
+            throw "Desktop executable was not created at $desktopBuiltExe"
+        }
+
+        Copy-Item -LiteralPath $desktopBuiltExe -Destination $desktopExePath -Force
+    }
+
     & $goExe build -o $exePath .\cmd\codex-lover
     if ($LASTEXITCODE -ne 0) {
         throw "go build failed with exit code $LASTEXITCODE"
@@ -82,6 +130,9 @@ if (-not $alreadyPresent) {
 
 Write-Host ""
 Write-Host "Installed codex-lover to $exePath"
+if (Test-Path $desktopExePath) {
+    Write-Host "Installed desktop app to $desktopExePath"
+}
 Write-Host "Shim created at $shimPath"
 if ($installedUserBinShim) {
     Write-Host "Shim also created at $userBinDir\\codex-lover.cmd"

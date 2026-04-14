@@ -32,6 +32,11 @@ type LogoutResult struct {
 	RemovedCache    bool
 }
 
+type ActivateResult struct {
+	Profile model.Profile
+	Home    string
+}
+
 func New(store *store.Store) *Service {
 	return &Service{store: store}
 }
@@ -42,6 +47,9 @@ func (s *Service) ImportCodexProfile(label string, homePath string) (model.Profi
 		return model.Profile{}, err
 	}
 	profile := codex.ProfileFromAuth(label, homePath, auth)
+	if strings.TrimSpace(label) == "" {
+		profile = codex.ObservedProfileFromAuth(homePath, auth)
+	}
 	if profile.Label == "" {
 		profile.Label = profile.ID
 	}
@@ -51,7 +59,38 @@ func (s *Service) ImportCodexProfile(label string, homePath string) (model.Profi
 	return profile, nil
 }
 
+func (s *Service) AddManagedCodexAccount(loginHomePath string) (model.Profile, error) {
+	auth, err := codex.LoadProfileAuth(loginHomePath)
+	if err != nil {
+		return model.Profile{}, err
+	}
+	runtimeHome, err := s.defaultCodexHome()
+	if err != nil {
+		return model.Profile{}, err
+	}
+	profile := codex.ObservedProfileFromAuth(runtimeHome, auth)
+	if profile.Label == "" {
+		profile.Label = profile.ID
+	}
+	if err := s.store.UpsertProfile(profile); err != nil {
+		return model.Profile{}, err
+	}
+	if err := codex.CacheHomeAuth(s.codexAuthCacheRoot(), profile.ID, loginHomePath); err != nil {
+		return model.Profile{}, err
+	}
+	if err := s.removeManagedCodexHome(loginHomePath); err != nil {
+		return model.Profile{}, err
+	}
+	return profile, nil
+}
+
 func (s *Service) RefreshAll() ([]model.ProfileStatus, error) {
+	if err := s.normalizeManagedCodexProfiles(); err != nil {
+		return nil, err
+	}
+	if err := s.normalizeLegacyProfileLabels(); err != nil {
+		return nil, err
+	}
 	cfg, err := s.store.LoadConfig()
 	if err != nil {
 		return nil, err
@@ -152,10 +191,22 @@ func (s *Service) RefreshAll() ([]model.ProfileStatus, error) {
 }
 
 func (s *Service) ProfileStatuses() ([]model.ProfileStatus, error) {
+	if err := s.normalizeManagedCodexProfiles(); err != nil {
+		return nil, err
+	}
+	if err := s.normalizeLegacyProfileLabels(); err != nil {
+		return nil, err
+	}
 	return s.store.ProfileStatuses()
 }
 
 func (s *Service) LogoutProfile(profileID string) (LogoutResult, error) {
+	if err := s.normalizeManagedCodexProfiles(); err != nil {
+		return LogoutResult{}, err
+	}
+	if err := s.normalizeLegacyProfileLabels(); err != nil {
+		return LogoutResult{}, err
+	}
 	statuses, err := s.store.ProfileStatuses()
 	if err != nil {
 		return LogoutResult{}, err
@@ -191,12 +242,61 @@ func (s *Service) LogoutProfile(profileID string) (LogoutResult, error) {
 		}
 		result.RemovedCache = true
 	}
+	if err := s.removeManagedCodexHome(selected.Profile.HomePath); err != nil {
+		return result, err
+	}
 
 	if err := s.store.RemoveProfile(selected.Profile.ID); err != nil {
 		return result, err
 	}
 
 	return result, nil
+}
+
+func (s *Service) ActivateProfile(profileID string) (ActivateResult, error) {
+	if err := s.normalizeManagedCodexProfiles(); err != nil {
+		return ActivateResult{}, err
+	}
+	if err := s.normalizeLegacyProfileLabels(); err != nil {
+		return ActivateResult{}, err
+	}
+	statuses, err := s.store.ProfileStatuses()
+	if err != nil {
+		return ActivateResult{}, err
+	}
+
+	var selected model.ProfileStatus
+	found := false
+	for _, status := range statuses {
+		if status.Profile.ID == profileID {
+			selected = status
+			found = true
+			break
+		}
+	}
+	if !found {
+		return ActivateResult{}, fmt.Errorf("profile %q not found", profileID)
+	}
+	if selected.Profile.Tool != model.ToolCodex {
+		return ActivateResult{}, fmt.Errorf("profile %q is not a Codex account", profileID)
+	}
+	if selected.State.AuthStatus == model.AuthStatusActive {
+		return ActivateResult{Profile: selected.Profile, Home: selected.Profile.HomePath}, nil
+	}
+	if !codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), selected.Profile.ID) {
+		return ActivateResult{}, fmt.Errorf("account %q does not have cached credentials", profileLabel(selected.Profile))
+	}
+	if err := codex.RestoreCachedHomeAuth(s.codexAuthCacheRoot(), selected.Profile.ID, selected.Profile.HomePath); err != nil {
+		return ActivateResult{}, err
+	}
+	return ActivateResult{
+		Profile: selected.Profile,
+		Home:    selected.Profile.HomePath,
+	}, nil
+}
+
+func (s *Service) HasCachedAuth(profileID string) bool {
+	return codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), profileID)
 }
 
 func (s *Service) RefreshLoggedOutCachedUsage(statuses []model.ProfileStatus) ([]model.ProfileStatus, int, error) {
@@ -322,6 +422,95 @@ func (s *Service) bestSwitchCandidate(statuses []model.ProfileStatus, active mod
 
 func (s *Service) codexAuthCacheRoot() string {
 	return filepath.Join(s.store.Root(), "codex-auth")
+}
+
+func (s *Service) ManagedCodexHomesRoot() string {
+	return filepath.Join(s.store.Root(), "homes", "codex")
+}
+
+func (s *Service) removeManagedCodexHome(homePath string) error {
+	managedRoot := s.ManagedCodexHomesRoot()
+	managedParent := filepath.Dir(homePath)
+	if !pathWithinRoot(managedParent, managedRoot) {
+		return nil
+	}
+	if err := os.RemoveAll(managedParent); err != nil {
+		return fmt.Errorf("remove managed Codex home: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) normalizeManagedCodexProfiles() error {
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return err
+	}
+	runtimeHome, err := s.defaultCodexHome()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, profile := range cfg.Profiles {
+		if profile.Tool != model.ToolCodex {
+			continue
+		}
+		oldHomePath := profile.HomePath
+		if !pathWithinRoot(oldHomePath, s.ManagedCodexHomesRoot()) {
+			continue
+		}
+		authPath := filepath.Join(oldHomePath, "auth.json")
+		if _, err := os.Stat(authPath); err == nil {
+			_ = codex.CacheHomeAuth(s.codexAuthCacheRoot(), profile.ID, oldHomePath)
+		}
+		profile.HomePath = runtimeHome
+		profile.UpdatedAt = now
+		if err := s.store.UpsertProfile(profile); err != nil {
+			return err
+		}
+		if err := s.removeManagedCodexHome(oldHomePath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) normalizeLegacyProfileLabels() error {
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	changed := false
+	for _, profile := range cfg.Profiles {
+		if profile.Tool != model.ToolCodex {
+			continue
+		}
+		if strings.TrimSpace(strings.ToLower(profile.Label)) != "default" {
+			continue
+		}
+		nextLabel := normalizeLegacyProfileLabel(profile)
+		if nextLabel == "" || nextLabel == "default" || nextLabel == profile.Label {
+			continue
+		}
+		profile.Label = nextLabel
+		profile.UpdatedAt = now
+		if err := s.store.UpsertProfile(profile); err != nil {
+			return err
+		}
+		changed = true
+	}
+	if changed {
+		return nil
+	}
+	return nil
+}
+
+func (s *Service) defaultCodexHome() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home: %w", err)
+	}
+	return filepath.Join(home, ".codex"), nil
 }
 
 func activeCodexStatus(statuses []model.ProfileStatus) (model.ProfileStatus, bool) {
@@ -488,4 +677,72 @@ func chooseNonEmpty(primary string, fallback string) string {
 		return primary
 	}
 	return fallback
+}
+
+func profileLabel(profile model.Profile) string {
+	if strings.TrimSpace(profile.Label) != "" {
+		return profile.Label
+	}
+	if strings.TrimSpace(profile.Email) != "" {
+		return profile.Email
+	}
+	return profile.ID
+}
+
+func normalizeLegacyProfileLabel(profile model.Profile) string {
+	for _, candidate := range []string{profile.Email, profile.AccountID, profile.ID} {
+		if value := normalizeObservedLikeLabel(candidate); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func normalizeObservedLikeLabel(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		"@", "-",
+		".", "-",
+		"_", "-",
+		" ", "-",
+	)
+	value = replacer.Replace(value)
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range value {
+		allowed := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if allowed {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	value = strings.Trim(builder.String(), "-")
+	return value
+}
+
+func pathWithinRoot(path string, root string) bool {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	absRoot, err := filepath.Abs(root)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(absRoot, absPath)
+	if err != nil {
+		return false
+	}
+	if rel == "." {
+		return true
+	}
+	return rel != "" && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }
