@@ -4,3 +4,11 @@ bin/
 *.out
 *.bak
 *.bak-*
+internal/desktop/frontend/node_modules/
+internal/desktop/frontend/dist/assets/
+internal/desktop/frontend/dist/index.html
+desktop-app/build/bin/
+desktop-app/frontend/dist/
+desktop-app/frontend/node_modules/
+desktop-app/frontend/wailsjs/
+.wails-scaffold/

@@ -2,176 +2,174 @@
 
 This file is for coding agents working on `codex-lover`.
 
-It explains what the project does, how to set it up from scratch, what files matter, and what assumptions are currently true. An agent should be able to read only this file plus the referenced source files and get productive quickly.
+Read this file first if you need to:
 
-## Project Summary
+- install the project from scratch
+- get the app running on a fresh Windows machine
+- understand what the product currently does
+- explain usage to another user
+- modify the current desktop-first architecture safely
 
-`codex-lover` is a local Go CLI for monitoring and controlling Codex account usage on Windows.
+## What This Project Is
 
-Current scope:
+`codex-lover` is a Windows-first desktop manager for multi-account Codex usage.
 
-- imports Codex profiles from local auth storage
-- fetches Codex usage from OpenAI backend endpoints
-- tracks multiple accounts observed over time in one shared Codex home
-- shows realtime terminal cards in `watch`
-- keeps logged-out accounts visible with cached usage
-- infers quota recovery for logged-out accounts when reset time passes
-- auto-syncs OpenCode OpenAI OAuth credentials to match the active Codex account
-- auto-switches Codex to another cached account when the active account reaches limit
+It exists to solve a specific workflow problem:
 
-The project is still a prototype. There is no full shim-based launch flow yet.
+- users may have multiple Codex accounts
+- only one account is active in the runtime auth file at a time
+- manually switching accounts is tedious
+- logged-out accounts still matter because their last known usage and reset time matter
+- OpenCode can drift away from the currently active Codex account
 
-## Core Product Behavior
+`codex-lover` keeps a local account registry, tracks usage, preserves logged-out accounts in the UI, syncs OpenCode, and auto-switches Codex when the active account reaches limit.
 
-The current mental model is:
+## Current Product Model
 
-- Codex is the source of truth
-- OpenCode follows Codex
-- `watch` is not just a viewer, it is the main control loop
+Current source of truth:
 
-When `codex-lover watch` runs, it:
+- Codex is the source of truth.
+- OpenCode follows Codex.
+- The desktop app is the main live control loop.
 
-1. refreshes Codex usage
-2. updates the local profile/state store
-3. caches active Codex auth for future switching
-4. auto-switches Codex if the active account is limited and a better cached account is available
-5. syncs OpenCode OpenAI OAuth to the active Codex account
-6. redraws the watch UI
+Current UX model:
 
-## Important Current Limitation
+- `codex-lover` opens the desktop app
+- `codex-lover run` opens the desktop app
+- `codex-lover watch` also opens the desktop app for compatibility
+- `codex-lover status` and `codex-lover refresh` remain plain text commands
 
-Auto-switch only works for accounts whose Codex auth was cached locally before.
+The old terminal watch UI is no longer the primary interface.
+
+## What The App Currently Does
+
+When the desktop app is open, it:
+
+1. refreshes active usage every 15 seconds
+2. refreshes logged-out accounts with cached auth every 15 minutes
+3. shows all known accounts in a card grid
+4. marks one account as `ACTIVE`
+5. keeps logged-out accounts visible as `LOGGED_OUT`
+6. keeps last known usage for logged-out accounts
+7. infers reset recovery for logged-out accounts when reset time passes
+8. notifies at 20% and 10% thresholds
+9. auto-switches to another cached account if the active account reaches limit
+10. syncs OpenCode to the active Codex account
+
+## Important Product Limitation
+
+Auto-switch only works for accounts whose Codex auth has already been cached locally.
 
 That means:
 
-- an account that is currently active gets cached automatically
-- a logged-out account can still appear in the UI from cached usage alone
-- but that account cannot be auto-switched into until it has been active at least once while this build was running
+- an active account becomes switchable automatically
+- a logged-out account can appear in the UI with cached usage
+- but it cannot be switched into unless cached auth exists for that account
 
-This distinction matters. Do not describe "visible in watch" as equivalent to "switchable".
+Do not describe “visible in the app” as equivalent to “switchable”.
 
 ## Environment Assumptions
 
-Observed working environment on the target machine:
+Working environment on the target machine:
 
-- OS: Windows
-- shell: PowerShell
-- Go installed at `C:\Program Files\Go\bin`
-- Codex auth at `%USERPROFILE%\.codex\auth.json`
-- OpenCode auth at `%USERPROFILE%\.local\share\opencode\auth.json`
-- runtime state at `%USERPROFILE%\.codex-lover`
+- Windows
+- PowerShell
+- Go installed
+- Node.js + npm installed
+- Wails CLI installed
+- WebView2 runtime installed
+- Codex installed and logged in at least once
 
-If an agent sees a different environment, it should verify paths before making assumptions.
+Observed paths on the current machine:
+
+- Codex auth: `%USERPROFILE%\.codex\auth.json`
+- OpenCode auth: `%USERPROFILE%\.local\share\opencode\auth.json`
+- codex-lover runtime state: `%USERPROFILE%\.codex-lover`
+- installed binaries: `%LOCALAPPDATA%\codex-lover\bin`
+
+Always verify paths if the machine differs.
 
 ## Repo Layout
 
 Top-level files:
 
-- `README.md`: end-user overview and usage
-- `PLAN.md`: broader roadmap and design direction
-- `AGENTS.md`: this file
-- `install.cmd`: Windows install wrapper
-- `install.ps1`: builds and installs `codex-lover.exe`
-- `go.mod`: module definition
+- [README.md](README.md): end-user documentation
+- [AGENTS.md](AGENTS.md): this file
+- [PLAN.desktop-app.md](PLAN.desktop-app.md): desktop plan/history
+- [install.cmd](install.cmd): Windows wrapper
+- [install.ps1](install.ps1): build and install script
 
-Entrypoint:
+CLI:
 
-- `cmd/codex-lover/main.go`
+- [main.go](cmd\codex-lover\main.go)
+- [app.go](internal\app\app.go)
 
-Main packages:
+Desktop launcher:
 
-- `internal/app`: CLI and watch UI
-- `internal/service`: refresh logic, selection logic, OpenCode sync orchestration
-- `internal/store`: local config/state persistence in `~/.codex-lover`
-- `internal/codex`: Codex auth loading, usage fetch, auth cache/restore
-- `internal/opencode`: OpenCode auth sync helper
-- `internal/model`: shared types
-- `internal/daemon`: daemon HTTP endpoints
+- [app.go](internal\desktop\app.go)
 
-## Files That Matter Most
+Desktop app:
 
-If you are changing behavior, start here:
+- [main.go](desktop-app\main.go)
+- [app.go](desktop-app\app.go)
+- [runtime.go](desktop-app\runtime.go)
+- [notifications.go](desktop-app\notifications.go)
+- [App.tsx](desktop-app\frontend\src\App.tsx)
+- [style.css](desktop-app\frontend\src\style.css)
 
-- `internal/app/app.go`
-  Purpose:
-  CLI commands, watch loop, terminal rendering, watch status text.
+Core backend packages:
 
-- `internal/service/service.go`
-  Purpose:
-  refresh logic, active account detection, auto-switch decision making, OpenCode sync orchestration.
-
-- `internal/codex/auth.go`
-  Purpose:
-  reads `~/.codex/auth.json`, extracts account info, computes auth fingerprints.
-
-- `internal/codex/usage.go`
-  Purpose:
-  fetches usage from the Codex/OpenAI backend and refreshes tokens when needed.
-
-- `internal/codex/cache.go`
-  Purpose:
-  stores/restores cached Codex auth files used for auto-switch.
-
-- `internal/opencode/sync.go`
-  Purpose:
-  copies active Codex OpenAI OAuth credentials into OpenCode auth storage.
-
-- `internal/model/types.go`
-  Purpose:
-  status model, auth state, usage windows.
-
-## Local Runtime Files
-
-These are not part of the repo, but the code depends on them:
-
-- `%USERPROFILE%\.codex\auth.json`
-  Active Codex auth.
-
-- `%USERPROFILE%\.local\share\opencode\auth.json`
-  OpenCode provider credentials.
-
-- `%USERPROFILE%\.codex-lover\config.json`
-  Imported profiles and runtime config.
-
-- `%USERPROFILE%\.codex-lover\state.json`
-  Cached profile state and usage history.
-
-- `%USERPROFILE%\.codex-lover\codex-auth\*.json`
-  Cached Codex auth copies used for auto-switch.
-
-Do not commit or print secrets from these files.
+- [service.go](internal\service\service.go)
+- [types.go](internal\model\types.go)
+- [auth.go](internal\codex\auth.go)
+- [usage.go](internal\codex\usage.go)
+- [cache.go](internal\codex\cache.go)
+- [sync.go](internal\opencode\sync.go)
+- [notify.go](internal\notify\notify.go)
 
 ## Setup From Scratch
 
-This section is written for another agent that needs to install the project on a fresh machine and get it running end-to-end.
+This section is the direct playbook another agent should follow.
 
-### 1. Clone or unpack the repo
-
-Place the repo somewhere writable, for example:
+### 1. Clone or open the repo
 
 ```powershell
 git clone https://github.com/example/codex-lover.git
 cd codex-lover
 ```
 
-If git is unavailable, copy the repo contents manually.
+If git is unavailable, copy the repo to a writable folder.
 
 ### 2. Verify Go
 
-Expected:
-
 ```powershell
-& 'C:\Program Files\Go\bin\go.exe' version
+go version
 ```
 
-If that path does not exist:
+If that fails, install Go first.
 
-- install Go
-- or adjust commands to the local Go path
+### 3. Verify Node and npm
 
-### 3. Verify Codex auth exists
+```powershell
+node -v
+npm -v
+```
 
-The project expects a file-backed Codex login:
+If either fails, install Node.js first.
+
+### 4. Install Wails CLI
+
+```powershell
+go install github.com/wailsapp/wails/v2/cmd/wails@latest
+```
+
+Optional verification:
+
+```powershell
+wails doctor
+```
+
+### 5. Verify Codex auth exists
 
 ```powershell
 Test-Path "$env:USERPROFILE\.codex\auth.json"
@@ -179,262 +177,274 @@ Test-Path "$env:USERPROFILE\.codex\auth.json"
 
 If false:
 
-- run Codex normally
+- open Codex normally
 - log in once
-- confirm `auth.json` appears
+- confirm the auth file exists
 
-### 4. Optionally verify OpenCode
-
-If OpenCode sync matters:
-
-```powershell
-Get-Command opencode -ErrorAction SilentlyContinue
-```
-
-And check:
+### 6. Optional: verify OpenCode auth
 
 ```powershell
 Test-Path "$env:USERPROFILE\.local\share\opencode\auth.json"
 ```
 
-OpenCode is optional for the basic Codex watch flow.
+OpenCode is optional, but if it exists the app can sync it automatically.
 
-### 5. Build the project
+### 7. Build and install the project
 
 From repo root:
-
-```powershell
-& 'C:\Program Files\Go\bin\go.exe' build .\cmd\codex-lover
-```
-
-### 6. Install the local binary
-
-Use the provided installer:
 
 ```powershell
 .\install.cmd
 ```
 
-Or:
+or:
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-This installs the binary to:
+The installer currently does all of this:
 
-```text
-%LOCALAPPDATA%\codex-lover\bin
-```
+- runs `wails build -clean` in `desktop-app`
+- builds the CLI launcher
+- installs `codex-lover.exe`
+- installs `codex-lover-desktop.exe`
+- creates `codex-lover.cmd`
+- updates user `PATH` if needed
 
-### 7. Refresh the shell PATH
-
-If still in the same shell:
-
-```powershell
-set PATH=%LOCALAPPDATA%\codex-lover\bin;%PATH%
-```
-
-Or open a new terminal.
-
-### 8. Import the active Codex profile
-
-Menu flow:
+### 8. Open the app
 
 ```powershell
 codex-lover
 ```
 
-Choose:
-
-```text
-1. Import default Codex profile (~/.codex)
-```
-
-Or direct CLI:
+or:
 
 ```powershell
-codex-lover profile import codex --label default --home %USERPROFILE%\.codex
+codex-lover run
 ```
 
-### 9. Confirm status
+Expected result:
+
+- the desktop app opens
+- account cards render
+- active account appears as `ACTIVE`
+
+### 9. Add another account
+
+Inside the app:
+
+- click `Add account`
+
+Expected flow:
+
+- a separate console opens
+- it runs `codex-lover account add`
+- Codex browser/device login opens
+- after login succeeds, refresh the desktop app
+
+### 10. Verify CLI summary still works
 
 ```powershell
 codex-lover status
 ```
 
-Expected:
+Expected result:
 
-- a card for the active account
-- quota bars
-- `ACTIVE` auth tag once refresh has run
+- a plain text summary of known profiles
+- no old terminal card UI
 
-### 10. Start the realtime control loop
+## How To Explain Usage To A User
 
-```powershell
-codex-lover watch
-```
+If another agent needs to explain usage quickly, use this model:
 
-Expected:
+- `codex-lover` opens the desktop app
+- `Add account` adds another Codex account without logging out the current one first
+- `Log in` on a card makes that cached account active
+- `Delete` removes cached auth and local account data for that account
+- the app refreshes automatically
+- notifications fire at 20% and 10%
+- auto-switch happens when the active account reaches limit
+- OpenCode is kept aligned with the active Codex account
 
-- active account card with a blinking red dot in the header
-- an `Auto switch:` line
-- an `OpenCode sync:` line
-- logged-out accounts shown with cached or inferred quota
+## Runtime Files And Data
 
-## What “Working” Means
+These files live outside the repo:
 
-A healthy current setup should show:
+- `%USERPROFILE%\.codex\auth.json`
+- `%USERPROFILE%\.local\share\opencode\auth.json`
+- `%USERPROFILE%\.codex-lover\config.json`
+- `%USERPROFILE%\.codex-lover\state.json`
+- `%USERPROFILE%\.codex-lover\codex-auth\*.json`
+- `%USERPROFILE%\.codex-lover\homes\codex\`
 
-- `Auto switch: standing by`
-- `OpenCode sync: already on ...` or `updated ...`
-- one `ACTIVE` Codex account
-- any previously seen accounts as `LOGGED OUT`
-
-If the active account has already hit limit and another cached account is ready, `watch` should eventually show:
-
-- `Auto switch: account-a -> account-b`
-
-and then OpenCode should sync to the new active account.
-
-## Security and Secret Handling
-
-Do not:
-
-- print raw access tokens
-- print raw refresh tokens
-- paste auth.json contents into chat
-- commit any auth file into git
+Do not commit or print real tokens from these files.
 
 It is acceptable to inspect:
 
-- account IDs
-- emails
-- token expiry timestamps
+- email
+- account id
+- expiry timestamps
 - provider names
-- whether files exist
+- file existence
 
-When discussing auth files, prefer redacted or structural summaries only.
+## Development Workflow
 
-## Development Conventions
-
-When editing:
-
-- use `apply_patch` for source changes
-- keep ASCII by default
-- avoid unnecessary dependencies
-- keep Windows behavior in mind
-
-When validating:
-
-- run `gofmt`
-- run `go build .\cmd\codex-lover`
-- if behavior depends on install paths, rerun `install.ps1`
-
-Recommended validation loop:
+Recommended loop:
 
 ```powershell
-& 'C:\Program Files\Go\bin\gofmt.exe' -w .\internal\app\app.go
-& 'C:\Program Files\Go\bin\go.exe' build .\cmd\codex-lover
+go test ./...
 .\install.cmd
-codex-lover status
-codex-lover watch
+codex-lover run
 ```
 
-## Current Watch-Specific Behavior
-
-The watch loop has two clocks:
-
-- usage refresh: every 15 seconds
-- live dot blink redraw: every 500 ms
-
-OpenCode sync is already optimized:
-
-- sync check runs when watch refreshes status
-- file writes are skipped if Codex active auth fingerprint did not change
-- UI still shows the last sync status
-
-This means watch is safe to leave running continuously.
-
-## Common Tasks For Future Agents
-
-### Add a new watch status line
-
-Start in:
-
-- `internal/app/app.go`
-
-Look for:
-
-- `printWatch`
-- `syncOpenCodeFromWatch`
-- `autoSwitchCodexFromWatch`
-
-### Adjust auto-switch policy
-
-Start in:
-
-- `internal/service/service.go`
-
-Look for:
-
-- `AutoSwitchLimitedCodex`
-- `bestSwitchCandidate`
-- `quotaScore`
-- `usageLimitReached`
-
-### Change how Codex auth is cached/restored
-
-Start in:
-
-- `internal/codex/cache.go`
-
-### Change OpenCode sync behavior
-
-Start in:
-
-- `internal/opencode/sync.go`
-
-### Change how usage is displayed for logged-out accounts
-
-Start in:
-
-- `internal/service/service.go`
-- `internal/app/app.go`
-
-Look for:
-
-- `EffectiveWindowForDisplay`
-- `WindowResetInferred`
-- `renderUsageLine`
-
-## Known Limitations
-
-- Auto-switch only works for accounts with cached Codex auth.
-- OpenCode follows Codex; reverse sync is not implemented.
-- Existing running OpenCode/Codex sessions may not hot-reload auth mid-process.
-- The UI is still ANSI-rendered text, not a full TUI framework.
-
-## If You Need To Push This Repo From Scratch
-
-If the repo is not yet a git repo:
+If you only need the desktop app build:
 
 ```powershell
-git init
-git branch -M main
-git remote add origin https://github.com/example/codex-lover.git
-git add .
-git commit -m "Initial commit"
-git push -u origin main
+cd .\desktop-app
+wails build -clean
 ```
+
+If frontend changes do not appear, rebuild and reinstall.
+
+## Current Build Model
+
+This matters because the desktop app is not the same executable as the CLI launcher.
+
+Current install output:
+
+- `codex-lover.exe`: CLI launcher and command entrypoint
+- `codex-lover-desktop.exe`: actual desktop app window
+
+Current behavior:
+
+- `codex-lover run` launches `codex-lover-desktop.exe`
+- the installer must rebuild both parts
+
+Do not collapse these two executables unless you intentionally redesign the packaging model.
+
+## Common Maintenance Tasks
+
+### Change desktop UI
+
+Start here:
+
+- [App.tsx](desktop-app\frontend\src\App.tsx)
+- [style.css](desktop-app\frontend\src\style.css)
+
+### Change desktop live behavior
+
+Start here:
+
+- [runtime.go](desktop-app\runtime.go)
+- [notifications.go](desktop-app\notifications.go)
+
+### Change business logic
+
+Start here:
+
+- [service.go](internal\service\service.go)
+
+Relevant methods:
+
+- `RefreshAll`
+- `RefreshLoggedOutCachedUsage`
+- `AutoSwitchLimitedCodex`
+- `SyncOpenCodeFromActiveCodex`
+- `ActivateProfile`
+- `LogoutProfile`
+
+### Change add-account flow
+
+Start here:
+
+- [app.go](desktop-app\app.go)
+- [app.go](internal\app\app.go)
+
+### Change install behavior
+
+Start here:
+
+- [install.ps1](install.ps1)
+
+## Troubleshooting
+
+### Installer fails because desktop exe is in use
+
+Close the app first or run:
+
+```powershell
+taskkill /IM codex-lover-desktop.exe /F
+.\install.cmd
+```
+
+### `Add account` opens a console and browser flow looks stuck
+
+That console is expected.
+
+It hosts the interactive `codex login` flow. If the browser is closed early, the console may still be waiting. Closing the browser alone does not automatically cancel the login process.
+
+### The desktop app opens but notifications do not fire
+
+The desktop app must stay open for the live control loop to run. Notifications are not driven by `status`; they are driven by the desktop runtime loop.
+
+### Auto-switch does not happen
+
+Check these conditions:
+
+- the active account actually reached effective limit
+- another account has cached auth
+- another account has usable quota
+
+### UI changes do not appear
+
+Rebuild and reinstall:
+
+```powershell
+.\install.cmd
+```
+
+If the desktop app is open, close it first.
+
+## Security Rules
+
+Never:
+
+- print raw access tokens
+- print raw refresh tokens
+- commit auth files
+- paste full auth payloads into chat or PR descriptions
+
+Prefer:
+
+- structural summaries
+- redacted values
+- account id/email only when necessary
+
+## Push Checklist
 
 Before pushing:
 
-- confirm no auth files are tracked
-- confirm `*.exe`, backups, and temp files are ignored
-- check `git status --short`
+```powershell
+git status --short
+```
 
-## Reference Documents
+Confirm:
 
-- `README.md`: user-facing install and usage
-- `PLAN.md`: roadmap and broader design direction
+- no auth files are tracked
+- generated binaries are ignored
+- desktop build artefacts are ignored
+- only intended source/docs changes remain
+
+## Short Version For Another Agent
+
+If another agent only needs the shortest possible handoff, this is enough:
+
+1. Install Go, Node.js, and Wails.
+2. Ensure Codex already created `%USERPROFILE%\.codex\auth.json`.
+3. Run [install.ps1](install.ps1).
+4. Launch `codex-lover`.
+5. Use the desktop app as the main UI.
+6. Use `Add account` to add more accounts.
+7. Use `Log in` and `Delete` on cards to manage accounts.
+8. Keep the app open if you want notifications, auto-switch, and OpenCode sync to run.
