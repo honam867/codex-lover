@@ -76,6 +76,9 @@ func (a *App) refreshLocked(emitNotifications bool) (Snapshot, error) {
 
 	snapshot := buildSnapshot(statuses, a.svc)
 	a.lastSnapshot = snapshot
+	if a.tray != nil {
+		a.tray.Update(snapshot)
+	}
 	return snapshot, nil
 }
 
@@ -89,6 +92,9 @@ func (a *App) currentSnapshotLocked() (Snapshot, error) {
 	}
 	snapshot := buildSnapshot(statuses, a.svc)
 	a.lastSnapshot = snapshot
+	if a.tray != nil {
+		a.tray.Update(snapshot)
+	}
 	return snapshot, nil
 }
 
@@ -102,6 +108,9 @@ func (a *App) refreshLoggedOutLocked() error {
 		return err
 	}
 	a.lastSnapshot = buildSnapshot(statuses, a.svc)
+	if a.tray != nil {
+		a.tray.Update(a.lastSnapshot)
+	}
 	return nil
 }
 
