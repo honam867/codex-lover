@@ -26,8 +26,13 @@ func main() {
 		},
 		BackgroundColour: &options.RGBA{R: 242, G: 246, B: 250, A: 1},
 		OnStartup:        app.startup,
+		OnShutdown:       app.shutdown,
 		Bind: []any{
 			app,
+		},
+		SingleInstanceLock: &options.SingleInstanceLock{
+			UniqueId: "codex-lover.desktop",
+			OnSecondInstanceLaunch: app.onSecondInstanceLaunch,
 		},
 		Windows: &windowsopts.Options{
 			WebviewUserDataPath: "",

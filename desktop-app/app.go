@@ -13,6 +13,8 @@ import (
 	"codex-lover/internal/model"
 	"codex-lover/internal/service"
 	"codex-lover/internal/store"
+	"github.com/wailsapp/wails/v2/pkg/options"
+	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 	"golang.org/x/sys/windows"
 )
 
@@ -33,7 +35,6 @@ type ProfileCard struct {
 	PrimarySummary      string `json:"primarySummary"`
 	SecondaryPercent    int    `json:"secondaryPercent"`
 	SecondarySummary    string `json:"secondarySummary"`
-	Credits             string `json:"credits"`
 	LastError           string `json:"lastError"`
 	CanLoginFromCache   bool   `json:"canLoginFromCache"`
 	LastRefreshedAtText string `json:"lastRefreshedAtText"`
@@ -45,6 +46,11 @@ type ActionResponse struct {
 	Snapshot Snapshot `json:"snapshot"`
 }
 
+type trayController interface {
+	Update(Snapshot)
+	Close()
+}
+
 type App struct {
 	ctx          context.Context
 	svc          *service.Service
@@ -53,6 +59,9 @@ type App struct {
 	lastSnapshot Snapshot
 	thresholds   *desktopWatchNotifications
 	openCodeSync desktopOpenCodeSyncCache
+	tray         trayController
+	hiddenToTray bool
+	quitting     bool
 }
 
 func NewApp() *App {
@@ -71,7 +80,24 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+	a.startTray()
 	go a.runBackgroundLoops()
+}
+
+func (a *App) shutdown(ctx context.Context) {
+	a.mu.Lock()
+	a.quitting = true
+	tray := a.tray
+	a.mu.Unlock()
+
+	if tray != nil {
+		tray.Close()
+	}
+	_ = ctx
+}
+
+func (a *App) onSecondInstanceLaunch(_ options.SecondInstanceData) {
+	a.restoreFromTray()
 }
 
 func (a *App) GetInitialSnapshot() Snapshot {
@@ -183,6 +209,20 @@ func (a *App) AddAccount() ActionResponse {
 	}
 }
 
+func (a *App) HideToTray() {
+	a.mu.Lock()
+	if a.hiddenToTray || a.quitting {
+		a.mu.Unlock()
+		return
+	}
+	a.hiddenToTray = true
+	a.mu.Unlock()
+
+	if a.ctx != nil {
+		wailsruntime.WindowHide(a.ctx)
+	}
+}
+
 func (a *App) ensureReady() error {
 	if a.initErr != nil {
 		return a.initErr
@@ -218,6 +258,37 @@ func (a *App) mustSnapshotFallback() Snapshot {
 	}
 }
 
+func (a *App) restoreFromTray() {
+	a.mu.Lock()
+	a.hiddenToTray = false
+	a.mu.Unlock()
+
+	if a.ctx == nil {
+		return
+	}
+	wailsruntime.Show(a.ctx)
+	wailsruntime.WindowShow(a.ctx)
+	wailsruntime.WindowUnminimise(a.ctx)
+}
+
+func (a *App) quitFromTray() {
+	a.mu.Lock()
+	if a.quitting {
+		a.mu.Unlock()
+		return
+	}
+	a.quitting = true
+	tray := a.tray
+	a.mu.Unlock()
+
+	if tray != nil {
+		tray.Close()
+	}
+	if a.ctx != nil {
+		wailsruntime.Quit(a.ctx)
+	}
+}
+
 func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapshot {
 	now := time.Now()
 	profiles := make([]ProfileCard, 0, len(statuses))
@@ -240,7 +311,6 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			PrimarySummary:      service.FormatWindowSummary(primary),
 			SecondaryPercent:    progressPercent(secondary),
 			SecondarySummary:    service.FormatWindowSummary(secondary),
-			Credits:             service.FormatCredits(usageCredits(status)),
 			LastError:           nonEmpty(status.State.LastError, "-"),
 			CanLoginFromCache:   canLoginFromCache,
 			LastRefreshedAtText: formatTimePointer(status.State.LastRefreshedAt),
@@ -301,13 +371,6 @@ func formatTimePointer(value *time.Time) string {
 		return "-"
 	}
 	return value.Local().Format("2006-01-02 15:04:05")
-}
-
-func usageCredits(status model.ProfileStatus) *model.CreditsSnapshot {
-	if status.State.Usage == nil {
-		return nil
-	}
-	return status.State.Usage.Credits
 }
 
 func launchAddAccountConsole() (string, error) {

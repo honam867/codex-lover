@@ -4,9 +4,11 @@ import {
   AddAccount,
   GetInitialSnapshot,
   GetSnapshot,
+  HideToTray,
   LogoutProfile,
   RefreshSnapshot,
 } from "../wailsjs/go/main/App";
+import { WindowIsMinimised } from "../wailsjs/runtime/runtime";
 
 type ProfileCard = {
   id: string;
@@ -20,7 +22,6 @@ type ProfileCard = {
   primarySummary: string;
   secondaryPercent: number;
   secondarySummary: string;
-  credits: string;
   lastError: string;
   canLoginFromCache: boolean;
   lastRefreshedAtText: string;
@@ -77,6 +78,33 @@ function App() {
     return () => window.clearInterval(timer);
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+
+    const timer = window.setInterval(async () => {
+      if (cancelled || inFlight) {
+        return;
+      }
+      inFlight = true;
+      try {
+        const minimised = await WindowIsMinimised();
+        if (minimised) {
+          await HideToTray();
+        }
+      } catch {
+        // ignore minimise polling errors
+      } finally {
+        inFlight = false;
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
   async function loadInitial() {
     const initial = await GetInitialSnapshot();
     setSnapshot(initial);
@@ -127,7 +155,7 @@ function App() {
       <div className="bg-orb orb-b" />
       <header className="topbar">
         <div>
-          <h1>codex-lover</h1>
+          <h1>Account Management</h1>
           <p>{statusText || `Accounts: ${profileCount}`}</p>
         </div>
         <div className="topbar-actions">
@@ -147,41 +175,42 @@ function App() {
             className={`account-card ${profile.isActive ? "active-card" : ""}`}
           >
             <div className="card-header">
-              <div>
-                <div className="card-title-row">
-                  <h2>{profile.label}</h2>
-                  {profile.isActive ? <span className="active-now">ACTIVE NOW</span> : null}
-                </div>
-                <div className="badge-row">
-                  <span className="mini-badge plan-badge">{profile.plan}</span>
-                  <span className={`mini-badge ${badgeTone(profile.authStatus)}`}>{profile.authStatus}</span>
-                  <span className={`mini-badge ${badgeTone(profile.freshness)}`}>{profile.freshness}</span>
-                </div>
+              <div className="card-title-row">
+                <h2 title={profile.label}>{profile.label}</h2>
+              </div>
+              <div className="badge-row">
+                <span className="mini-badge plan-badge">{profile.plan}</span>
+                <span className={`mini-badge ${badgeTone(profile.authStatus)}`}>{profile.authStatus}</span>
+                <span className={`mini-badge ${badgeTone(profile.freshness)}`}>{profile.freshness}</span>
               </div>
             </div>
 
-            <p className="email-line">{profile.email}</p>
+            <p className="email-line" title={profile.email}>{profile.email}</p>
 
             <div className="meter-block">
-              <div className="meter-label">5H</div>
+              <div className="meter-row">
+                <div className="meter-label">5H</div>
+                <div className="meter-summary" title={profile.primarySummary}>{profile.primarySummary}</div>
+              </div>
               <div className="meter-track">
                 <div
                   className={`meter-fill meter-${meterTone(profile.primaryPercent)}`}
                   style={{ width: `${profile.primaryPercent}%` }}
                 />
               </div>
-              <div className="meter-summary">{profile.primarySummary}</div>
             </div>
 
             <div className="meter-block">
-              <div className="meter-label">WEEKLY</div>
+              <div className="meter-row">
+                <div className="meter-label">WEEKLY</div>
+                <div className="meter-summary" title={profile.secondarySummary}>{profile.secondarySummary}</div>
+              </div>
               <div className="meter-track">
                 <div
                   className={`meter-fill meter-${meterTone(profile.secondaryPercent)}`}
                   style={{ width: `${profile.secondaryPercent}%` }}
                 />
               </div>
-              <div className="meter-summary">{profile.secondarySummary}</div>
             </div>
 
             <div className="card-actions">
@@ -206,7 +235,6 @@ function App() {
             </div>
 
             <footer className="card-footer">
-              <span>Credits: {profile.credits}</span>
               <span>{profile.lastRefreshedAtText}</span>
             </footer>
           </article>
