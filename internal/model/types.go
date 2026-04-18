@@ -4,6 +4,7 @@ import "time"
 
 const (
 	ToolCodex = "codex"
+	ToolClaude = "claude"
 
 	AuthStatusUnknown   = "unknown"
 	AuthStatusActive    = "active"
@@ -26,6 +27,7 @@ type Profile struct {
 	ID             string    `json:"id"`
 	Label          string    `json:"label"`
 	Tool           string    `json:"tool"`
+	Provider       string    `json:"provider,omitempty"`
 	HomePath       string    `json:"home_path"`
 	Email          string    `json:"email,omitempty"`
 	AccountID      string    `json:"account_id,omitempty"`

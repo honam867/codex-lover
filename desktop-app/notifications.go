@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"codex-lover/internal/model"
@@ -36,7 +37,7 @@ func (watcher *desktopWatchNotifications) collectThresholdEvents(statuses []mode
 	events := []desktopThresholdEvent{}
 
 	for _, status := range statuses {
-		if status.Profile.Tool != model.ToolCodex || status.State.AuthStatus != model.AuthStatusActive {
+		if status.State.AuthStatus != model.AuthStatusActive {
 			continue
 		}
 		events = append(events, watcher.collectWindowThresholdEvents(status, "5H", status.State.UsageWindowPrimary(), now)...)
@@ -95,8 +96,19 @@ func buildDesktopThresholdEvent(
 	window *model.UsageWindow,
 ) desktopThresholdEvent {
 	account := desktopThresholdAccountLabel(status)
+	provider := strings.TrimSpace(status.Profile.Provider)
+	if provider == "" {
+		provider = status.Profile.Tool
+	}
+	if provider == "" {
+		provider = "account"
+	}
+	titleProvider := provider
+	if titleProvider != "" {
+		titleProvider = strings.ToUpper(titleProvider[:1]) + titleProvider[1:]
+	}
 	return desktopThresholdEvent{
-		Title: fmt.Sprintf("Codex account reached %d%%", threshold),
+		Title: fmt.Sprintf("%s account reached %d%%", titleProvider, threshold),
 		Message: fmt.Sprintf(
 			"Account %s da cham toi %d%% %s (%s)",
 			account,

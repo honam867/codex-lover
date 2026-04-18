@@ -91,7 +91,11 @@ func runAccountCommand(ctx context.Context, svc *service.Service, st *store.Stor
 	}
 	switch args[0] {
 	case "add":
-		profile, err := addCodexAccount(ctx, svc, st)
+		provider := model.ToolCodex
+		if len(args) > 1 {
+			provider = strings.ToLower(strings.TrimSpace(args[1]))
+		}
+		profile, err := addAccount(ctx, svc, st, provider)
 		if err != nil {
 			return err
 		}
@@ -108,9 +112,10 @@ func runProfileCommand(svc *service.Service, args []string) error {
 	}
 	switch args[0] {
 	case "import":
-		if len(args) < 2 || args[1] != model.ToolCodex {
-			return errors.New("usage: codex-lover profile import codex --label NAME --home PATH")
+		if len(args) < 2 || (args[1] != model.ToolCodex && args[1] != model.ToolClaude) {
+			return errors.New("usage: codex-lover profile import <codex|claude> --label NAME --home PATH")
 		}
+		tool := args[1]
 		label, homePath, err := parseImportFlags(args[2:])
 		if err != nil {
 			return err
@@ -122,7 +127,15 @@ func runProfileCommand(svc *service.Service, args []string) error {
 			}
 			homePath = abs
 		}
-		profile, err := svc.ImportCodexProfile(label, homePath)
+		var profile model.Profile
+		switch tool {
+		case model.ToolCodex:
+			profile, err = svc.ImportCodexProfile(label, homePath)
+		case model.ToolClaude:
+			profile, err = svc.ImportClaudeProfile(label, homePath)
+		default:
+			err = fmt.Errorf("unsupported profile import tool %q", tool)
+		}
 		if err != nil {
 			return err
 		}
@@ -167,6 +180,17 @@ func parseImportFlags(args []string) (string, string, error) {
 	return label, home, nil
 }
 
+func addAccount(ctx context.Context, svc *service.Service, st *store.Store, provider string) (model.Profile, error) {
+	switch provider {
+	case "", model.ToolCodex:
+		return addCodexAccount(ctx, svc, st)
+	case model.ToolClaude:
+		return addClaudeAccount(ctx, svc, st)
+	default:
+		return model.Profile{}, fmt.Errorf("unsupported account provider %q", provider)
+	}
+}
+
 func addCodexAccount(ctx context.Context, svc *service.Service, st *store.Store) (model.Profile, error) {
 	basePath, homePath, err := prepareManagedCodexLoginHome(st.Root())
 	if err != nil {
@@ -183,6 +207,31 @@ func addCodexAccount(ctx context.Context, svc *service.Service, st *store.Store)
 		return model.Profile{}, err
 	}
 	profile, err := svc.AddManagedCodexAccount(homePath)
+	if err != nil {
+		return model.Profile{}, fmt.Errorf("login finished but account import failed: %w", err)
+	}
+	if _, err := svc.RefreshAll(); err != nil {
+		return model.Profile{}, err
+	}
+	return profile, nil
+}
+
+func addClaudeAccount(ctx context.Context, svc *service.Service, st *store.Store) (model.Profile, error) {
+	homePath, err := prepareManagedClaudeLoginHome(st.Root())
+	if err != nil {
+		return model.Profile{}, err
+	}
+	defer func() {
+		_ = os.RemoveAll(homePath)
+	}()
+
+	fmt.Println("Add Claude account")
+	fmt.Printf("Managed home: %s\n", homePath)
+
+	if err := launchClaudeLogin(ctx, homePath); err != nil {
+		return model.Profile{}, err
+	}
+	profile, err := svc.AddManagedClaudeAccount(homePath)
 	if err != nil {
 		return model.Profile{}, fmt.Errorf("login finished but account import failed: %w", err)
 	}
@@ -227,6 +276,36 @@ func prepareManagedCodexLoginHome(storeRoot string) (string, string, error) {
 	return basePath, homePath, nil
 }
 
+func prepareManagedClaudeLoginHome(storeRoot string) (string, error) {
+	root := filepath.Join(storeRoot, "homes", "claude")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("create managed Claude homes root: %w", err)
+	}
+
+	var homePath string
+	for attempt := 0; attempt < 100; attempt++ {
+		name := time.Now().UTC().Format("20060102-150405")
+		if attempt > 0 {
+			name += "-" + strconv.Itoa(attempt+1)
+		}
+		candidate := filepath.Join(root, name)
+		if _, err := os.Stat(candidate); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		if err := os.MkdirAll(candidate, 0o700); err != nil {
+			return "", fmt.Errorf("create managed Claude login home: %w", err)
+		}
+		homePath = candidate
+		break
+	}
+	if homePath == "" {
+		return "", errors.New("could not allocate managed Claude login home")
+	}
+	return homePath, nil
+}
+
 func launchCodexLogin(ctx context.Context, basePath string, homePath string) error {
 	cmdPath, err := resolveCodexLoginCommand()
 	if err != nil {
@@ -252,6 +331,27 @@ func launchCodexLogin(ctx context.Context, basePath string, homePath string) err
 	return nil
 }
 
+func launchClaudeLogin(ctx context.Context, homePath string) error {
+	cmdPath, err := resolveClaudeLoginCommand()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Starting `claude auth login`...")
+	cmd := exec.CommandContext(ctx, "cmd.exe", "/d", "/c", cmdPath, "auth", "login", "--claudeai")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = claudeLoginEnv(homePath)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("run claude auth login: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(homePath, ".credentials.json")); err != nil {
+		return fmt.Errorf("claude auth login finished but %s was not created", filepath.Join(homePath, ".credentials.json"))
+	}
+	return nil
+}
+
 func resolveCodexLoginCommand() (string, error) {
 	for _, candidate := range []string{"codex.cmd", "codex"} {
 		if path, err := exec.LookPath(candidate); err == nil {
@@ -259,6 +359,15 @@ func resolveCodexLoginCommand() (string, error) {
 		}
 	}
 	return "", errors.New("could not locate Codex CLI")
+}
+
+func resolveClaudeLoginCommand() (string, error) {
+	for _, candidate := range []string{"claude.exe", "claude"} {
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path, nil
+		}
+	}
+	return "", errors.New("could not locate Claude CLI")
 }
 
 func codexLoginEnv(basePath string, homePath string) []string {
@@ -277,6 +386,12 @@ func codexLoginEnv(basePath string, homePath string) []string {
 	if rest != "" {
 		env = setEnvValue(env, "HOMEPATH", rest)
 	}
+	return env
+}
+
+func claudeLoginEnv(homePath string) []string {
+	env := os.Environ()
+	env = setEnvValue(env, "CLAUDE_CONFIG_DIR", homePath)
 	return env
 }
 
@@ -368,8 +483,8 @@ func printUsage() {
 	fmt.Println("Commands:")
 	fmt.Println("  run")
 	fmt.Println("  watch")
-	fmt.Println("  account add")
-	fmt.Println("  profile import codex --label NAME --home PATH")
+	fmt.Println("  account add [codex|claude]")
+	fmt.Println("  profile import <codex|claude> --label NAME --home PATH")
 	fmt.Println("  profile list")
 	fmt.Println("  refresh")
 	fmt.Println("  status")

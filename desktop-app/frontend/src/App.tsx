@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import codexLogo from "./assets/provider-codex.svg";
+import claudeLogo from "./assets/provider-claude.svg";
 import {
   ActivateProfile,
   AddAccount,
@@ -14,6 +16,7 @@ type ProfileCard = {
   id: string;
   label: string;
   email: string;
+  provider: string;
   plan: string;
   authStatus: string;
   freshness: string;
@@ -67,6 +70,8 @@ function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>({ generatedAt: "", profiles: [] });
   const [busyProfile, setBusyProfile] = useState<string>("");
   const [statusText, setStatusText] = useState<string>("Loading...");
+  const [providerFilter, setProviderFilter] = useState<string>("all");
+  const [showAddModal, setShowAddModal] = useState<boolean>(false);
 
   const profileCount = snapshot.profiles.length;
 
@@ -126,6 +131,7 @@ function App() {
     setSnapshot(result.snapshot);
     setStatusText(result.error ? `${result.message}: ${result.error}` : result.message || `Last refresh: ${result.snapshot.generatedAt}`);
     setBusyProfile("");
+    setShowAddModal(false);
   }
 
   async function onActivate(profileId: string) {
@@ -142,12 +148,28 @@ function App() {
     applyAction(result);
   }
 
-  async function onAdd() {
-    const result = await AddAccount();
+  async function onAdd(provider: string) {
+    const result = await AddAccount(provider);
     applyAction(result);
   }
 
-  const sortedProfiles = useMemo(() => snapshot.profiles, [snapshot]);
+  const providerOptions = useMemo(() => {
+    const values = Array.from(new Set(snapshot.profiles.map((profile) => profile.provider || "unknown")));
+    return values.sort((left, right) => left.localeCompare(right));
+  }, [snapshot.profiles]);
+
+  useEffect(() => {
+    if (providerFilter !== "all" && !providerOptions.includes(providerFilter)) {
+      setProviderFilter("all");
+    }
+  }, [providerFilter, providerOptions]);
+
+  const sortedProfiles = useMemo(() => {
+    if (providerFilter === "all") {
+      return snapshot.profiles;
+    }
+    return snapshot.profiles.filter((profile) => (profile.provider || "unknown") === providerFilter);
+  }, [providerFilter, snapshot.profiles]);
 
   return (
     <div className="app-shell">
@@ -159,10 +181,24 @@ function App() {
           <p>{statusText || `Accounts: ${profileCount}`}</p>
         </div>
         <div className="topbar-actions">
+          <label className="provider-filter" title="Filter by provider">
+            <select
+              aria-label="Filter by provider"
+              value={providerFilter}
+              onChange={(event) => setProviderFilter(event.target.value)}
+            >
+              <option value="all">All providers</option>
+              {providerOptions.map((provider) => (
+                <option key={provider} value={provider}>
+                  {providerLabel(provider)}
+                </option>
+              ))}
+            </select>
+          </label>
           <button className="ghost-btn" onClick={() => void refresh()}>
             Refresh now
           </button>
-          <button className="solid-btn" onClick={() => void onAdd()}>
+          <button className="solid-btn" onClick={() => setShowAddModal(true)}>
             Add account
           </button>
         </div>
@@ -172,7 +208,7 @@ function App() {
         {sortedProfiles.map((profile) => (
           <article
             key={profile.id}
-            className={`account-card ${profile.isActive ? "active-card" : ""}`}
+            className={`account-card ${profile.isActive ? `active-card active-card-${(profile.provider || "unknown").toLowerCase()}` : ""}`}
           >
             <div className="card-header">
               <div className="card-title-row">
@@ -236,12 +272,67 @@ function App() {
 
             <footer className="card-footer">
               <span>{profile.lastRefreshedAtText}</span>
+              <div className="provider-mark provider-mark-footer" title={providerLabel(profile.provider)}>
+                <img src={providerLogo(profile.provider)} alt={providerLabel(profile.provider)} />
+                <span>{providerLabel(profile.provider)}</span>
+              </div>
             </footer>
           </article>
         ))}
       </main>
+
+      {showAddModal ? (
+        <div className="modal-backdrop" onClick={() => setShowAddModal(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3>Add account</h3>
+                <p>Choose the provider to start a login flow in a separate console window.</p>
+              </div>
+              <button className="modal-close" onClick={() => setShowAddModal(false)} aria-label="Close add account dialog">
+                ×
+              </button>
+            </div>
+            <div className="provider-choice-grid">
+              <button className="provider-choice provider-choice-codex" onClick={() => void onAdd("codex")}>
+                <img src={codexLogo} alt="Codex" />
+                <strong>Codex</strong>
+                <span>Open a Codex login console</span>
+              </button>
+              <button className="provider-choice provider-choice-claude" onClick={() => void onAdd("claude")}>
+                <img src={claudeLogo} alt="Claude" />
+                <strong>Claude</strong>
+                <span>Open a Claude login console</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
+}
+
+function providerLabel(provider: string) {
+  const normalized = (provider || "").trim().toLowerCase();
+  switch (normalized) {
+    case "codex":
+      return "Codex";
+    case "claude":
+      return "Claude";
+    default:
+      return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : "Unknown";
+  }
+}
+
+function providerLogo(provider: string) {
+  const normalized = (provider || "").trim().toLowerCase();
+  switch (normalized) {
+    case "claude":
+      return claudeLogo;
+    case "codex":
+    default:
+      return codexLogo;
+  }
 }
 
 export default App;
