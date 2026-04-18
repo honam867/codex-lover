@@ -8,6 +8,7 @@ import (
 
 	"codex-lover/internal/model"
 	"codex-lover/internal/notify"
+	"codex-lover/internal/service"
 )
 
 func (a *App) runBackgroundLoops() {
@@ -16,7 +17,7 @@ func (a *App) runBackgroundLoops() {
 	}
 
 	a.mu.Lock()
-	_, _ = a.refreshLocked(true)
+	_, _ = a.refreshLockedWithOptions(true, service.RefreshOptions{})
 	a.mu.Unlock()
 
 	refreshTicker := time.NewTicker(15 * time.Second)
@@ -31,7 +32,7 @@ func (a *App) runBackgroundLoops() {
 			return
 		case <-refreshTicker.C:
 			a.mu.Lock()
-			_, _ = a.refreshLocked(true)
+			_, _ = a.refreshLockedWithOptions(true, a.backgroundRefreshOptionsLocked())
 			a.mu.Unlock()
 		case <-backgroundUsageTicker.C:
 			a.mu.Lock()
@@ -42,10 +43,15 @@ func (a *App) runBackgroundLoops() {
 }
 
 func (a *App) refreshLocked(emitNotifications bool) (Snapshot, error) {
-	statuses, err := a.svc.RefreshAll()
+	return a.refreshLockedWithOptions(emitNotifications, service.RefreshOptions{})
+}
+
+func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.RefreshOptions) (Snapshot, error) {
+	statuses, err := a.svc.RefreshAllWithOptions(opts)
 	if err != nil {
 		return Snapshot{}, err
 	}
+	a.usageSchedule.MarkUsageAttempted(opts, time.Now())
 
 	if emitNotifications {
 		for _, event := range a.thresholds.collectThresholdEvents(statuses) {
@@ -66,7 +72,10 @@ func (a *App) refreshLocked(emitNotifications bool) (Snapshot, error) {
 				Level:   notify.LevelInfo,
 			})
 		}
-		statuses, err = a.svc.RefreshAll()
+		statuses, err = a.svc.RefreshAllWithOptions(opts)
+		if err == nil {
+			a.usageSchedule.MarkUsageAttempted(opts, time.Now())
+		}
 	}
 	if err != nil {
 		return Snapshot{}, err
@@ -80,6 +89,12 @@ func (a *App) refreshLocked(emitNotifications bool) (Snapshot, error) {
 		a.tray.Update(snapshot)
 	}
 	return snapshot, nil
+}
+
+func (a *App) backgroundRefreshOptionsLocked() service.RefreshOptions {
+	return service.RefreshOptions{
+		SkipUsageForTools: a.usageSchedule.SkipUsageTools(time.Now()),
+	}
 }
 
 func (a *App) currentSnapshotLocked() (Snapshot, error) {
@@ -133,6 +148,43 @@ func (a *App) syncOpenCodeLocked(statuses []model.ProfileStatus) error {
 
 type desktopOpenCodeSyncCache struct {
 	fingerprint string
+}
+
+type providerUsageSchedule struct {
+	lastAttempted map[string]time.Time
+}
+
+func newProviderUsageSchedule() providerUsageSchedule {
+	return providerUsageSchedule{
+		lastAttempted: map[string]time.Time{},
+	}
+}
+
+func (s *providerUsageSchedule) SkipUsageTools(now time.Time) map[string]bool {
+	skipped := map[string]bool{}
+	if last := s.lastAttempted[model.ToolClaude]; !last.IsZero() && now.Sub(last) < 60*time.Second {
+		skipped[model.ToolClaude] = true
+	}
+	return skipped
+}
+
+func (s *providerUsageSchedule) MarkUsageAttempted(opts service.RefreshOptions, now time.Time) {
+	if s.lastAttempted == nil {
+		s.lastAttempted = map[string]time.Time{}
+	}
+	if !shouldSkipUsageTool(opts, model.ToolCodex) {
+		s.lastAttempted[model.ToolCodex] = now
+	}
+	if !shouldSkipUsageTool(opts, model.ToolClaude) {
+		s.lastAttempted[model.ToolClaude] = now
+	}
+}
+
+func shouldSkipUsageTool(opts service.RefreshOptions, tool string) bool {
+	if len(opts.SkipUsageForTools) == 0 {
+		return false
+	}
+	return opts.SkipUsageForTools[tool]
 }
 
 func activeCodexSyncFingerprint(statuses []model.ProfileStatus) string {

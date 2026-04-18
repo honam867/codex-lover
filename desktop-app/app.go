@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -27,6 +28,7 @@ type ProfileCard struct {
 	ID                  string `json:"id"`
 	Label               string `json:"label"`
 	Email               string `json:"email"`
+	Provider            string `json:"provider"`
 	Plan                string `json:"plan"`
 	AuthStatus          string `json:"authStatus"`
 	Freshness           string `json:"freshness"`
@@ -52,16 +54,17 @@ type trayController interface {
 }
 
 type App struct {
-	ctx          context.Context
-	svc          *service.Service
-	initErr      error
-	mu           sync.Mutex
-	lastSnapshot Snapshot
-	thresholds   *desktopWatchNotifications
-	openCodeSync desktopOpenCodeSyncCache
-	tray         trayController
-	hiddenToTray bool
-	quitting     bool
+	ctx           context.Context
+	svc           *service.Service
+	initErr       error
+	mu            sync.Mutex
+	lastSnapshot  Snapshot
+	thresholds    *desktopWatchNotifications
+	openCodeSync  desktopOpenCodeSyncCache
+	tray          trayController
+	hiddenToTray  bool
+	quitting      bool
+	usageSchedule providerUsageSchedule
 }
 
 func NewApp() *App {
@@ -73,8 +76,9 @@ func NewApp() *App {
 		return &App{initErr: err}
 	}
 	return &App{
-		svc:        service.New(st),
-		thresholds: newDesktopWatchNotifications(),
+		svc:           service.New(st),
+		thresholds:    newDesktopWatchNotifications(),
+		usageSchedule: newProviderUsageSchedule(),
 	}
 }
 
@@ -194,8 +198,8 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 	}
 }
 
-func (a *App) AddAccount() ActionResponse {
-	message, err := launchAddAccountConsole()
+func (a *App) AddAccount(provider string) ActionResponse {
+	message, err := launchAddAccountConsole(provider)
 	if err != nil {
 		return ActionResponse{
 			Message:  "Add account failed",
@@ -296,13 +300,14 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 		primary := service.EffectiveWindowForDisplay(status.State.UsageWindowPrimary(), status.State.AuthStatus, now)
 		secondary := service.EffectiveWindowForDisplay(status.State.UsageWindowSecondary(), status.State.AuthStatus, now)
 		canLoginFromCache := false
-		if svc != nil && status.Profile.Tool == model.ToolCodex && status.State.AuthStatus != model.AuthStatusActive {
+		if svc != nil && status.State.AuthStatus != model.AuthStatusActive {
 			canLoginFromCache = svc.HasCachedAuth(status.Profile.ID)
 		}
 		profiles = append(profiles, ProfileCard{
 			ID:                  status.Profile.ID,
 			Label:               profileLabel(status.Profile),
 			Email:               nonEmpty(status.Profile.Email, "-"),
+			Provider:            profileProvider(status.Profile),
 			Plan:                nonEmpty(status.Profile.Plan, "-"),
 			AuthStatus:          nonEmpty(status.State.AuthStatus, model.AuthStatusUnknown),
 			Freshness:           freshnessLabel(status),
@@ -350,6 +355,9 @@ func freshnessLabel(status model.ProfileStatus) string {
 }
 
 func profileLabel(profile model.Profile) string {
+	if shouldDisplayEmail(profile) {
+		return profile.Email
+	}
 	if profile.Label != "" {
 		return profile.Label
 	}
@@ -359,11 +367,72 @@ func profileLabel(profile model.Profile) string {
 	return profile.ID
 }
 
+func shouldDisplayEmail(profile model.Profile) bool {
+	if strings.TrimSpace(profile.Email) == "" {
+		return false
+	}
+	label := strings.TrimSpace(profile.Label)
+	if label == "" {
+		return true
+	}
+	return normalizeDisplayLabel(profile.Email) == strings.ToLower(label)
+}
+
+func normalizeDisplayLabel(value string) string {
+	value = strings.TrimSpace(strings.ToLower(value))
+	if value == "" {
+		return ""
+	}
+	replacer := strings.NewReplacer(
+		"@", "-",
+		".", "-",
+		"_", "-",
+		" ", "-",
+	)
+	value = replacer.Replace(value)
+	var builder strings.Builder
+	lastDash := false
+	for _, r := range value {
+		allowed := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if allowed {
+			builder.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if !lastDash {
+			builder.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(builder.String(), "-")
+}
+
 func nonEmpty(value string, fallback string) string {
 	if value != "" {
 		return value
 	}
 	return fallback
+}
+
+func profileProvider(profile model.Profile) string {
+	if strings.TrimSpace(profile.Provider) != "" {
+		return strings.ToLower(strings.TrimSpace(profile.Provider))
+	}
+	if strings.TrimSpace(profile.Tool) != "" {
+		return strings.ToLower(strings.TrimSpace(profile.Tool))
+	}
+	return model.ToolCodex
+}
+
+func providerDisplayName(provider string) string {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case model.ToolClaude:
+		return "Claude"
+	case model.ToolCodex:
+		return "Codex"
+	default:
+		return strings.TrimSpace(provider)
+	}
 }
 
 func formatTimePointer(value *time.Time) string {
@@ -373,20 +442,24 @@ func formatTimePointer(value *time.Time) string {
 	return value.Local().Format("2006-01-02 15:04:05")
 }
 
-func launchAddAccountConsole() (string, error) {
+func launchAddAccountConsole(provider string) (string, error) {
 	cliPath, err := resolveCLIExecutable()
 	if err != nil {
 		return "", err
 	}
+	provider = strings.TrimSpace(strings.ToLower(provider))
+	if provider == "" {
+		provider = model.ToolCodex
+	}
 
-	cmd := exec.Command(cliPath, "account", "add")
+	cmd := exec.Command(cliPath, "account", "add", provider)
 	cmd.SysProcAttr = &syscall.SysProcAttr{
 		CreationFlags: windows.CREATE_NEW_CONSOLE,
 	}
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("launch add account console: %w", err)
 	}
-	return "Opened a separate console for Codex login. Complete login there, then refresh this window.", nil
+	return fmt.Sprintf("Opened a separate console for %s login. Complete login there, then refresh this window.", providerDisplayName(provider)), nil
 }
 
 func resolveCLIExecutable() (string, error) {
