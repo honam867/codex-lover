@@ -5,6 +5,7 @@ import "time"
 const (
 	ToolCodex = "codex"
 	ToolClaude = "claude"
+	ToolKimi   = "kimi"
 
 	AuthStatusUnknown   = "unknown"
 	AuthStatusActive    = "active"
@@ -17,6 +18,8 @@ type Config struct {
 	PollIntervalSeconds int          `json:"poll_interval_seconds"`
 	Daemon              DaemonConfig `json:"daemon"`
 	Profiles            []Profile    `json:"profiles"`
+	AutoRotateCodex     bool         `json:"auto_rotate_codex"`
+	AutoRotateThreshold float64      `json:"auto_rotate_threshold"`
 }
 
 type DaemonConfig struct {

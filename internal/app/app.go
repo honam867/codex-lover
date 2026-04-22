@@ -112,8 +112,8 @@ func runProfileCommand(svc *service.Service, args []string) error {
 	}
 	switch args[0] {
 	case "import":
-		if len(args) < 2 || (args[1] != model.ToolCodex && args[1] != model.ToolClaude) {
-			return errors.New("usage: codex-lover profile import <codex|claude> --label NAME --home PATH")
+		if len(args) < 2 || (args[1] != model.ToolCodex && args[1] != model.ToolClaude && args[1] != model.ToolKimi) {
+			return errors.New("usage: codex-lover profile import <codex|claude|kimi> --label NAME --home PATH")
 		}
 		tool := args[1]
 		label, homePath, err := parseImportFlags(args[2:])
@@ -133,6 +133,8 @@ func runProfileCommand(svc *service.Service, args []string) error {
 			profile, err = svc.ImportCodexProfile(label, homePath)
 		case model.ToolClaude:
 			profile, err = svc.ImportClaudeProfile(label, homePath)
+		case model.ToolKimi:
+			profile, err = svc.ImportKimiProfile(label, homePath)
 		default:
 			err = fmt.Errorf("unsupported profile import tool %q", tool)
 		}
@@ -186,6 +188,8 @@ func addAccount(ctx context.Context, svc *service.Service, st *store.Store, prov
 		return addCodexAccount(ctx, svc, st)
 	case model.ToolClaude:
 		return addClaudeAccount(ctx, svc, st)
+	case model.ToolKimi:
+		return addKimiAccount(ctx, svc, st)
 	default:
 		return model.Profile{}, fmt.Errorf("unsupported account provider %q", provider)
 	}
@@ -368,6 +372,98 @@ func resolveClaudeLoginCommand() (string, error) {
 		}
 	}
 	return "", errors.New("could not locate Claude CLI")
+}
+
+func addKimiAccount(ctx context.Context, svc *service.Service, st *store.Store) (model.Profile, error) {
+	homePath, err := prepareManagedKimiLoginHome(st.Root())
+	if err != nil {
+		return model.Profile{}, err
+	}
+	defer func() {
+		_ = os.RemoveAll(homePath)
+	}()
+
+	fmt.Println("Add Kimi account")
+	fmt.Printf("Managed home: %s\n", homePath)
+
+	if err := launchKimiLogin(ctx, homePath); err != nil {
+		return model.Profile{}, err
+	}
+	profile, err := svc.AddManagedKimiAccount(homePath)
+	if err != nil {
+		return model.Profile{}, fmt.Errorf("login finished but account import failed: %w", err)
+	}
+	if _, err := svc.RefreshAll(); err != nil {
+		return model.Profile{}, err
+	}
+	return profile, nil
+}
+
+func prepareManagedKimiLoginHome(storeRoot string) (string, error) {
+	root := filepath.Join(storeRoot, "homes", "kimi")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return "", fmt.Errorf("create managed Kimi homes root: %w", err)
+	}
+
+	var homePath string
+	for attempt := 0; attempt < 100; attempt++ {
+		name := time.Now().UTC().Format("20060102-150405")
+		if attempt > 0 {
+			name += "-" + strconv.Itoa(attempt+1)
+		}
+		candidate := filepath.Join(root, name)
+		if _, err := os.Stat(candidate); err == nil {
+			continue
+		} else if !os.IsNotExist(err) {
+			return "", err
+		}
+		if err := os.MkdirAll(candidate, 0o700); err != nil {
+			return "", fmt.Errorf("create managed Kimi login home: %w", err)
+		}
+		homePath = candidate
+		break
+	}
+	if homePath == "" {
+		return "", errors.New("could not allocate managed Kimi login home")
+	}
+	return homePath, nil
+}
+
+func launchKimiLogin(ctx context.Context, homePath string) error {
+	cmdPath, err := resolveKimiLoginCommand()
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("Starting `kimi login`...")
+	cmd := exec.CommandContext(ctx, "cmd.exe", "/d", "/c", cmdPath, "login")
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Env = kimiLoginEnv(homePath)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("run kimi login: %w", err)
+	}
+	if _, err := os.Stat(filepath.Join(homePath, "credentials", "kimi-code.json")); err != nil {
+		return fmt.Errorf("kimi login finished but %s was not created", filepath.Join(homePath, "credentials", "kimi-code.json"))
+	}
+	return nil
+}
+
+func resolveKimiLoginCommand() (string, error) {
+	for _, candidate := range []string{"kimi.exe", "kimi"} {
+		if path, err := exec.LookPath(candidate); err == nil {
+			return path, nil
+		}
+	}
+	return "", errors.New("could not locate Kimi CLI")
+}
+
+func kimiLoginEnv(homePath string) []string {
+	env := os.Environ()
+	env = setEnvValue(env, "HOME", homePath)
+	env = setEnvValue(env, "USERPROFILE", homePath)
+	return env
 }
 
 func codexLoginEnv(basePath string, homePath string) []string {

@@ -198,6 +198,41 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 	}
 }
 
+func (a *App) GetConfig() model.Config {
+	if err := a.ensureReady(); err != nil {
+		return model.Config{}
+	}
+	cfg, err := a.svc.LoadConfig()
+	if err != nil {
+		return model.Config{}
+	}
+	return cfg
+}
+
+func (a *App) SetAutoRotateCodex(enabled bool) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	cfg, err := a.svc.LoadConfig()
+	if err != nil {
+		return err
+	}
+	cfg.AutoRotateCodex = enabled
+	return a.svc.SaveConfig(cfg)
+}
+
+func (a *App) SetAutoRotateThreshold(threshold float64) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	cfg, err := a.svc.LoadConfig()
+	if err != nil {
+		return err
+	}
+	cfg.AutoRotateThreshold = threshold
+	return a.svc.SaveConfig(cfg)
+}
+
 func (a *App) AddAccount(provider string) ActionResponse {
 	message, err := launchAddAccountConsole(provider)
 	if err != nil {
@@ -430,6 +465,8 @@ func providerDisplayName(provider string) string {
 		return "Claude"
 	case model.ToolCodex:
 		return "Codex"
+	case model.ToolKimi:
+		return "Kimi"
 	default:
 		return strings.TrimSpace(provider)
 	}

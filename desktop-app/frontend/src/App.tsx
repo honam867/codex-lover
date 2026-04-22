@@ -1,14 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
 import codexLogo from "./assets/provider-codex.svg";
 import claudeLogo from "./assets/provider-claude.svg";
+import kimiLogo from "./assets/provider-kimi.svg";
 import {
   ActivateProfile,
   AddAccount,
+  GetConfig,
   GetInitialSnapshot,
   GetSnapshot,
   HideToTray,
   LogoutProfile,
   RefreshSnapshot,
+  SetAutoRotateCodex,
+  SetAutoRotateThreshold,
 } from "../wailsjs/go/main/App";
 import { WindowIsMinimised } from "../wailsjs/runtime/runtime";
 
@@ -72,16 +76,55 @@ function App() {
   const [statusText, setStatusText] = useState<string>("Loading...");
   const [providerFilter, setProviderFilter] = useState<string>("all");
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
+  const [autoRotateEnabled, setAutoRotateEnabled] = useState<boolean>(false);
+  const [autoRotateThreshold, setAutoRotateThreshold] = useState<number>(5);
 
   const profileCount = snapshot.profiles.length;
 
   useEffect(() => {
     void loadInitial();
+    void loadConfig();
     const timer = window.setInterval(() => {
       void loadCurrent();
     }, 15000);
     return () => window.clearInterval(timer);
   }, []);
+
+  async function loadConfig() {
+    try {
+      const config = await GetConfig();
+      // Wails bindings use snake_case for Go struct fields
+      const enabled = (config as any).auto_rotate_codex;
+      const threshold = (config as any).auto_rotate_threshold;
+      if (typeof enabled === "boolean") {
+        setAutoRotateEnabled(enabled);
+      }
+      if (typeof threshold === "number") {
+        setAutoRotateThreshold(threshold);
+      }
+    } catch {
+      // ignore config loading errors
+    }
+  }
+
+  async function toggleAutoRotate(value: boolean) {
+    setAutoRotateEnabled(value);
+    try {
+      await SetAutoRotateCodex(value);
+    } catch {
+      // ignore
+    }
+  }
+
+  async function updateThreshold(value: number) {
+    setAutoRotateThreshold(value);
+    try {
+      await SetAutoRotateThreshold(value);
+    } catch {
+      // ignore
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -198,6 +241,12 @@ function App() {
           <button className="ghost-btn" onClick={() => void refresh()}>
             Refresh now
           </button>
+          <button className="settings-btn" title="Settings" onClick={() => setShowSettingsModal(true)} aria-label="Open settings">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
           <button className="solid-btn" onClick={() => setShowAddModal(true)}>
             Add account
           </button>
@@ -304,6 +353,59 @@ function App() {
                 <strong>Claude</strong>
                 <span>Open a Claude login console</span>
               </button>
+              <button className="provider-choice provider-choice-kimi" onClick={() => void onAdd("kimi")}>
+                <img src={kimiLogo} alt="Kimi" />
+                <strong>Kimi</strong>
+                <span>Open a Kimi login console</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {showSettingsModal ? (
+        <div className="modal-backdrop" onClick={() => setShowSettingsModal(false)}>
+          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
+            <div className="modal-header">
+              <div>
+                <h3>Settings</h3>
+                <p>Configure auto-rotate and switching behavior.</p>
+              </div>
+              <button className="modal-close" onClick={() => setShowSettingsModal(false)} aria-label="Close settings dialog">
+                ×
+              </button>
+            </div>
+            <div className="settings-body">
+              <div className="settings-row">
+                <div className="settings-label">
+                  <strong>Auto-rotate Codex accounts (5H-First)</strong>
+                  <span>Automatically switch to another cached account when the active one drops below the threshold.</span>
+                </div>
+                <label className="toggle-switch">
+                  <input
+                    type="checkbox"
+                    checked={autoRotateEnabled}
+                    onChange={(e) => void toggleAutoRotate(e.target.checked)}
+                  />
+                  <span className="toggle-slider" />
+                </label>
+              </div>
+              <div className="settings-row">
+                <div className="settings-label">
+                  <strong>Switch threshold (%)</strong>
+                  <span>Percentage of remaining 5H quota that triggers a switch.</span>
+                </div>
+                <div className="slider-control">
+                  <input
+                    type="range"
+                    min={1}
+                    max={20}
+                    value={autoRotateThreshold}
+                    onChange={(e) => void updateThreshold(Number(e.target.value))}
+                  />
+                  <span className="slider-value">{autoRotateThreshold}%</span>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -319,6 +421,8 @@ function providerLabel(provider: string) {
       return "Codex";
     case "claude":
       return "Claude";
+    case "kimi":
+      return "Kimi";
     default:
       return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : "Unknown";
   }
@@ -329,6 +433,8 @@ function providerLogo(provider: string) {
   switch (normalized) {
     case "claude":
       return claudeLogo;
+    case "kimi":
+      return kimiLogo;
     case "codex":
     default:
       return codexLogo;

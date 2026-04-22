@@ -81,6 +81,17 @@ func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.Refr
 		return Snapshot{}, err
 	}
 
+	rotateResult, err := a.svc.AutoRotateCodex(statuses)
+	if err == nil && rotateResult.Changed {
+		statuses, err = a.svc.RefreshAllWithOptions(opts)
+		if err == nil {
+			a.usageSchedule.MarkUsageAttempted(opts, time.Now())
+		}
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+
 	_ = a.syncOpenCodeLocked(statuses)
 
 	snapshot := buildSnapshot(statuses, a.svc)

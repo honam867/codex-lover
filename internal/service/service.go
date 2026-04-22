@@ -5,11 +5,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"codex-lover/internal/claude"
 	"codex-lover/internal/codex"
+	"codex-lover/internal/kimi"
 	"codex-lover/internal/model"
 	"codex-lover/internal/opencode"
 	"codex-lover/internal/store"
@@ -17,6 +19,14 @@ import (
 
 type Service struct {
 	store *store.Store
+}
+
+func (s *Service) LoadConfig() (model.Config, error) {
+	return s.store.LoadConfig()
+}
+
+func (s *Service) SaveConfig(cfg model.Config) error {
+	return s.store.SaveConfig(cfg)
 }
 
 type SwitchResult struct {
@@ -132,6 +142,49 @@ func (s *Service) AddManagedClaudeAccount(loginHomePath string) (model.Profile, 
 	return profile, nil
 }
 
+func (s *Service) ImportKimiProfile(label string, homePath string) (model.Profile, error) {
+	auth, err := kimi.LoadProfileAuth(homePath)
+	if err != nil {
+		return model.Profile{}, err
+	}
+	profile := kimi.ProfileFromAuth(label, homePath, auth)
+	if strings.TrimSpace(label) == "" {
+		profile = kimi.ObservedProfileFromAuth(homePath, auth)
+	}
+	if profile.Label == "" {
+		profile.Label = profile.ID
+	}
+	if err := s.store.UpsertProfile(profile); err != nil {
+		return model.Profile{}, err
+	}
+	return profile, nil
+}
+
+func (s *Service) AddManagedKimiAccount(loginHomePath string) (model.Profile, error) {
+	auth, err := kimi.LoadProfileAuth(loginHomePath)
+	if err != nil {
+		return model.Profile{}, err
+	}
+	runtimeHome, err := s.defaultKimiHome()
+	if err != nil {
+		return model.Profile{}, err
+	}
+	profile := kimi.ObservedProfileFromAuth(runtimeHome, auth)
+	if profile.Label == "" {
+		profile.Label = profile.ID
+	}
+	if err := s.store.UpsertProfile(profile); err != nil {
+		return model.Profile{}, err
+	}
+	if err := kimi.CacheHomeAuth(s.kimiAuthCacheRoot(), profile.ID, loginHomePath); err != nil {
+		return model.Profile{}, err
+	}
+	if err := s.removeManagedKimiHome(loginHomePath); err != nil {
+		return model.Profile{}, err
+	}
+	return profile, nil
+}
+
 func (s *Service) RefreshAll() ([]model.ProfileStatus, error) {
 	return s.RefreshAllWithOptions(RefreshOptions{})
 }
@@ -143,7 +196,13 @@ func (s *Service) RefreshAllWithOptions(opts RefreshOptions) ([]model.ProfileSta
 	if err := s.normalizeManagedClaudeProfiles(); err != nil {
 		return nil, err
 	}
+	if err := s.normalizeManagedKimiProfiles(); err != nil {
+		return nil, err
+	}
 	if err := s.ensureDefaultClaudeProfile(); err != nil {
+		return nil, err
+	}
+	if err := s.ensureDefaultKimiProfile(); err != nil {
 		return nil, err
 	}
 	if err := s.normalizeAnonymousClaudeProfiles(); err != nil {
@@ -170,12 +229,15 @@ func (s *Service) RefreshAllWithOptions(opts RefreshOptions) ([]model.ProfileSta
 
 	profilesByHome := map[string][]model.Profile{}
 	claudeProfilesByHome := map[string][]model.Profile{}
+	kimiProfilesByHome := map[string][]model.Profile{}
 	for _, profile := range cfg.Profiles {
 		switch profile.Tool {
 		case model.ToolCodex:
 			profilesByHome[profile.HomePath] = append(profilesByHome[profile.HomePath], profile)
 		case model.ToolClaude:
 			claudeProfilesByHome[profile.HomePath] = append(claudeProfilesByHome[profile.HomePath], profile)
+		case model.ToolKimi:
+			kimiProfilesByHome[profile.HomePath] = append(kimiProfilesByHome[profile.HomePath], profile)
 		}
 	}
 	authFingerprints := map[string]string{}
@@ -339,6 +401,86 @@ func (s *Service) RefreshAllWithOptions(opts RefreshOptions) ([]model.ProfileSta
 			_ = claude.CacheHomeAuth(s.claudeAuthCacheRoot(), activeProfile.ID, activeProfile.HomePath)
 		}
 	}
+
+	for homePath, profiles := range kimiProfilesByHome {
+		now := time.Now().UTC()
+		auth, err := kimi.LoadProfileAuth(homePath)
+		if err != nil {
+			authStatus := authStatusFromLoadError(err)
+			for _, profile := range profiles {
+				state := hydrateProfileState(currentState.Profiles[profile.ID], profile.ID, now)
+				state.AuthStatus = authStatus
+				if authStatus == model.AuthStatusLoggedOut {
+					state.LastSeenLoggedOutAt = &now
+					state.LastError = ""
+				} else {
+					state.LastError = err.Error()
+				}
+				if err := s.store.UpdateProfileState(profile.ID, state); err != nil {
+					return nil, err
+				}
+				currentState.Profiles[profile.ID] = state
+			}
+			continue
+		}
+
+		activeProfile, existed := findMatchingProfile(profiles, auth.AccountID, auth.Email)
+		if !existed {
+			activeProfile = kimi.ObservedProfileFromAuth(homePath, auth)
+		} else {
+			activeProfile.Email = chooseNonEmpty(auth.Email, activeProfile.Email)
+			activeProfile.AccountID = chooseNonEmpty(auth.AccountID, activeProfile.AccountID)
+			activeProfile.Plan = chooseNonEmpty(auth.Plan, activeProfile.Plan)
+			activeProfile.UpdatedAt = now
+		}
+		if err := s.store.UpsertProfile(activeProfile); err != nil {
+			return nil, err
+		}
+		if !containsProfile(profiles, activeProfile.ID) {
+			profiles = append(profiles, activeProfile)
+		}
+
+		skipUsage := shouldSkipUsageForTool(opts, model.ToolKimi)
+		var usage *model.UsageSnapshot
+		var usageErr error
+		if !skipUsage {
+			usage, usageErr = kimi.FetchUsage(auth)
+		}
+
+		for _, profile := range profiles {
+			state := hydrateProfileState(currentState.Profiles[profile.ID], profile.ID, now)
+			if profile.ID == activeProfile.ID {
+				state.AuthStatus = model.AuthStatusActive
+				state.AuthFingerprint = kimi.AuthFingerprint(auth)
+				authFingerprints[profile.ID] = state.AuthFingerprint
+				state.LastSeenActiveAt = &now
+				state.LastSeenLoggedOutAt = nil
+				if skipUsage {
+					state.LastError = ""
+				} else if usageErr != nil {
+					if shouldKeepCachedUsageWithoutError(state, usageErr) {
+						state.LastError = ""
+					} else {
+						state.LastError = usageErr.Error()
+					}
+				} else {
+					state.Usage = usage
+					state.LastError = ""
+				}
+			} else {
+				state.AuthStatus = model.AuthStatusLoggedOut
+				state.LastSeenLoggedOutAt = &now
+				state.LastError = ""
+			}
+			if err := s.store.UpdateProfileState(profile.ID, state); err != nil {
+				return nil, err
+			}
+			currentState.Profiles[profile.ID] = state
+		}
+		if !skipUsage && usageErr == nil {
+			_ = kimi.CacheHomeAuth(s.kimiAuthCacheRoot(), activeProfile.ID, activeProfile.HomePath)
+		}
+	}
 	statuses, err := s.store.ProfileStatuses()
 	if err != nil {
 		return nil, err
@@ -365,7 +507,13 @@ func (s *Service) ProfileStatuses() ([]model.ProfileStatus, error) {
 	if err := s.normalizeManagedClaudeProfiles(); err != nil {
 		return nil, err
 	}
+	if err := s.normalizeManagedKimiProfiles(); err != nil {
+		return nil, err
+	}
 	if err := s.ensureDefaultClaudeProfile(); err != nil {
+		return nil, err
+	}
+	if err := s.ensureDefaultKimiProfile(); err != nil {
 		return nil, err
 	}
 	if err := s.normalizeAnonymousClaudeProfiles(); err != nil {
@@ -390,7 +538,13 @@ func (s *Service) LogoutProfile(profileID string) (LogoutResult, error) {
 	if err := s.normalizeManagedClaudeProfiles(); err != nil {
 		return LogoutResult{}, err
 	}
+	if err := s.normalizeManagedKimiProfiles(); err != nil {
+		return LogoutResult{}, err
+	}
 	if err := s.ensureDefaultClaudeProfile(); err != nil {
+		return LogoutResult{}, err
+	}
+	if err := s.ensureDefaultKimiProfile(); err != nil {
 		return LogoutResult{}, err
 	}
 	if err := s.normalizeAnonymousClaudeProfiles(); err != nil {
@@ -442,6 +596,14 @@ func (s *Service) LogoutProfile(profileID string) (LogoutResult, error) {
 				}
 				result.RemovedHomeAuth = true
 			}
+		case model.ToolKimi:
+			auth, err := kimi.LoadProfileAuth(selected.Profile.HomePath)
+			if err == nil && profileMatchesAuth(selected.Profile, auth.AccountID, auth.Email) {
+				if err := kimi.DeleteHomeAuth(selected.Profile.HomePath); err != nil {
+					return result, err
+				}
+				result.RemovedHomeAuth = true
+			}
 		}
 	}
 
@@ -455,6 +617,9 @@ func (s *Service) LogoutProfile(profileID string) (LogoutResult, error) {
 		return result, err
 	}
 	if err := s.removeManagedClaudeHome(selected.Profile.HomePath); err != nil {
+		return result, err
+	}
+	if err := s.removeManagedKimiHome(selected.Profile.HomePath); err != nil {
 		return result, err
 	}
 
@@ -472,7 +637,13 @@ func (s *Service) ActivateProfile(profileID string) (ActivateResult, error) {
 	if err := s.normalizeManagedClaudeProfiles(); err != nil {
 		return ActivateResult{}, err
 	}
+	if err := s.normalizeManagedKimiProfiles(); err != nil {
+		return ActivateResult{}, err
+	}
 	if err := s.ensureDefaultClaudeProfile(); err != nil {
+		return ActivateResult{}, err
+	}
+	if err := s.ensureDefaultKimiProfile(); err != nil {
 		return ActivateResult{}, err
 	}
 	if err := s.normalizeAnonymousClaudeProfiles(); err != nil {
@@ -639,6 +810,83 @@ func (s *Service) SyncOpenCodeFromActiveCodex(statuses []model.ProfileStatus) (o
 	return opencode.SyncResult{}, fmt.Errorf("no active Codex account to sync")
 }
 
+func (s *Service) AutoRotateCodex(statuses []model.ProfileStatus) (SwitchResult, error) {
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return SwitchResult{}, err
+	}
+	if !cfg.AutoRotateCodex {
+		return SwitchResult{Checked: true, Reason: "auto-rotate disabled"}, nil
+	}
+	active, ok := activeCodexStatus(statuses)
+	if !ok {
+		return SwitchResult{Checked: true, Reason: "no active Codex account"}, nil
+	}
+	var candidates []model.ProfileStatus
+	for _, status := range statuses {
+		if status.Profile.Tool != model.ToolCodex {
+			continue
+		}
+		if !codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), status.Profile.ID) {
+			continue
+		}
+		if weeklyRemaining(status) <= 0.5 {
+			continue
+		}
+		candidates = append(candidates, status)
+	}
+	if len(candidates) == 0 {
+		return SwitchResult{Checked: true, From: active.Profile, Reason: "no cached ready account"}, nil
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		return fiveHourRemaining(candidates[i]) > fiveHourRemaining(candidates[j])
+	})
+	top := candidates[0]
+	if top.Profile.ID == active.Profile.ID {
+		return SwitchResult{Checked: true, From: active.Profile, Reason: "active account is already best"}, nil
+	}
+	diff := fiveHourRemaining(top) - fiveHourRemaining(active)
+	if diff <= cfg.AutoRotateThreshold {
+		return SwitchResult{Checked: true, From: active.Profile, Reason: fmt.Sprintf("top account diff %.2f%% <= threshold %.2f%%", diff, cfg.AutoRotateThreshold)}, nil
+	}
+	if err := codex.RestoreCachedHomeAuth(s.codexAuthCacheRoot(), top.Profile.ID, active.Profile.HomePath); err != nil {
+		return SwitchResult{Checked: true, From: active.Profile, To: top.Profile}, err
+	}
+	return SwitchResult{
+		Checked: true,
+		Changed: true,
+		From:    active.Profile,
+		To:      top.Profile,
+		Reason:  fmt.Sprintf("auto-rotate: top account has %.2f%% more 5h remaining", diff),
+	}, nil
+}
+
+func fiveHourRemaining(status model.ProfileStatus) float64 {
+	if status.State.Usage == nil {
+		return 0
+	}
+	if status.State.Usage.Secondary != nil {
+		return status.State.Usage.Secondary.RemainingPercent
+	}
+	if status.State.Usage.Primary != nil {
+		return status.State.Usage.Primary.RemainingPercent
+	}
+	return 0
+}
+
+func weeklyRemaining(status model.ProfileStatus) float64 {
+	if status.State.Usage == nil {
+		return 0
+	}
+	if status.State.Usage.Primary != nil {
+		return status.State.Usage.Primary.RemainingPercent
+	}
+	if status.State.Usage.Secondary != nil {
+		return status.State.Usage.Secondary.RemainingPercent
+	}
+	return 0
+}
+
 func (s *Service) AutoSwitchLimitedCodex(statuses []model.ProfileStatus) (SwitchResult, error) {
 	active, ok := activeCodexStatus(statuses)
 	if !ok {
@@ -700,12 +948,20 @@ func (s *Service) claudeAuthCacheRoot() string {
 	return filepath.Join(s.store.Root(), "claude-auth")
 }
 
+func (s *Service) kimiAuthCacheRoot() string {
+	return filepath.Join(s.store.Root(), "kimi-auth")
+}
+
 func (s *Service) ManagedCodexHomesRoot() string {
 	return filepath.Join(s.store.Root(), "homes", "codex")
 }
 
 func (s *Service) ManagedClaudeHomesRoot() string {
 	return filepath.Join(s.store.Root(), "homes", "claude")
+}
+
+func (s *Service) ManagedKimiHomesRoot() string {
+	return filepath.Join(s.store.Root(), "homes", "kimi")
 }
 
 func (s *Service) removeManagedCodexHome(homePath string) error {
@@ -727,6 +983,17 @@ func (s *Service) removeManagedClaudeHome(homePath string) error {
 	}
 	if err := os.RemoveAll(homePath); err != nil {
 		return fmt.Errorf("remove managed Claude home: %w", err)
+	}
+	return nil
+}
+
+func (s *Service) removeManagedKimiHome(homePath string) error {
+	managedRoot := s.ManagedKimiHomesRoot()
+	if !pathWithinRoot(homePath, managedRoot) {
+		return nil
+	}
+	if err := os.RemoveAll(homePath); err != nil {
+		return fmt.Errorf("remove managed Kimi home: %w", err)
 	}
 	return nil
 }
@@ -793,6 +1060,40 @@ func (s *Service) normalizeManagedClaudeProfiles() error {
 			return err
 		}
 		if err := s.removeManagedClaudeHome(oldHomePath); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Service) normalizeManagedKimiProfiles() error {
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return err
+	}
+	runtimeHome, err := s.defaultKimiHome()
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	for _, profile := range cfg.Profiles {
+		if profile.Tool != model.ToolKimi {
+			continue
+		}
+		oldHomePath := profile.HomePath
+		if !pathWithinRoot(oldHomePath, s.ManagedKimiHomesRoot()) {
+			continue
+		}
+		authPath := filepath.Join(oldHomePath, "credentials", "kimi-code.json")
+		if _, err := os.Stat(authPath); err == nil {
+			_ = kimi.CacheHomeAuth(s.kimiAuthCacheRoot(), profile.ID, oldHomePath)
+		}
+		profile.HomePath = runtimeHome
+		profile.UpdatedAt = now
+		if err := s.store.UpsertProfile(profile); err != nil {
+			return err
+		}
+		if err := s.removeManagedKimiHome(oldHomePath); err != nil {
 			return err
 		}
 	}
@@ -930,6 +1231,50 @@ func (s *Service) ensureDefaultClaudeProfile() error {
 	}
 
 	return s.store.UpsertProfile(claude.ObservedProfileFromAuth(homePath, auth))
+}
+
+func (s *Service) ensureDefaultKimiProfile() error {
+	homePath, err := s.defaultKimiHome()
+	if err != nil {
+		return err
+	}
+	auth, err := kimi.LoadProfileAuth(homePath)
+	if err != nil {
+		return nil
+	}
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return err
+	}
+	for _, profile := range cfg.Profiles {
+		if profile.Tool != model.ToolKimi {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(profile.HomePath), strings.TrimSpace(homePath)) {
+			continue
+		}
+		if strings.TrimSpace(profile.Email) != "" || strings.TrimSpace(profile.AccountID) != "" {
+			continue
+		}
+		profile.Label = chooseNonEmpty(kimi.ObservedProfileFromAuth(homePath, auth).Label, profile.Label)
+		profile.Email = chooseNonEmpty(auth.Email, profile.Email)
+		profile.AccountID = chooseNonEmpty(auth.AccountID, profile.AccountID)
+		profile.Plan = chooseNonEmpty(auth.Plan, profile.Plan)
+		profile.Provider = chooseNonEmpty(model.ToolKimi, profile.Provider)
+		profile.UpdatedAt = time.Now().UTC()
+		return s.store.UpsertProfile(profile)
+	}
+
+	for _, profile := range cfg.Profiles {
+		if profile.Tool != model.ToolKimi {
+			continue
+		}
+		if profileMatchesAuth(profile, auth.AccountID, auth.Email) {
+			return nil
+		}
+	}
+
+	return s.store.UpsertProfile(kimi.ObservedProfileFromAuth(homePath, auth))
 }
 
 func (s *Service) normalizeDuplicateCodexProfiles() error {
@@ -1114,14 +1459,24 @@ func (s *Service) defaultClaudeHome() (string, error) {
 	return filepath.Join(home, ".claude"), nil
 }
 
+func (s *Service) defaultKimiHome() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve user home: %w", err)
+	}
+	return filepath.Join(home, ".kimi"), nil
+}
+
 func (s *Service) hasCachedAuthForProfile(profileID string, tool string) bool {
 	switch tool {
 	case model.ToolCodex:
 		return codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), profileID)
 	case model.ToolClaude:
 		return claude.HasCachedHomeAuth(s.claudeAuthCacheRoot(), profileID)
+	case model.ToolKimi:
+		return kimi.HasCachedHomeAuth(s.kimiAuthCacheRoot(), profileID)
 	default:
-		return codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), profileID) || claude.HasCachedHomeAuth(s.claudeAuthCacheRoot(), profileID)
+		return codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), profileID) || claude.HasCachedHomeAuth(s.claudeAuthCacheRoot(), profileID) || kimi.HasCachedHomeAuth(s.kimiAuthCacheRoot(), profileID)
 	}
 }
 
@@ -1131,6 +1486,8 @@ func (s *Service) restoreCachedAuthByTool(tool string, profileID string, homePat
 		return codex.RestoreCachedHomeAuth(s.codexAuthCacheRoot(), profileID, homePath)
 	case model.ToolClaude:
 		return claude.RestoreCachedHomeAuth(s.claudeAuthCacheRoot(), profileID, homePath)
+	case model.ToolKimi:
+		return kimi.RestoreCachedHomeAuth(s.kimiAuthCacheRoot(), profileID, homePath)
 	default:
 		return fmt.Errorf("tool %q does not support cached auth restore", tool)
 	}
@@ -1142,6 +1499,8 @@ func (s *Service) moveCachedAuthByTool(tool string, sourceProfileID string, targ
 		return codex.MoveCachedHomeAuth(s.codexAuthCacheRoot(), sourceProfileID, targetProfileID)
 	case model.ToolClaude:
 		return claude.MoveCachedHomeAuth(s.claudeAuthCacheRoot(), sourceProfileID, targetProfileID)
+	case model.ToolKimi:
+		return kimi.MoveCachedHomeAuth(s.kimiAuthCacheRoot(), sourceProfileID, targetProfileID)
 	default:
 		return fmt.Errorf("tool %q does not support cached auth move", tool)
 	}
@@ -1153,6 +1512,8 @@ func (s *Service) deleteCachedAuthByTool(tool string, profileID string) error {
 		return codex.DeleteCachedHomeAuth(s.codexAuthCacheRoot(), profileID)
 	case model.ToolClaude:
 		return claude.DeleteCachedHomeAuth(s.claudeAuthCacheRoot(), profileID)
+	case model.ToolKimi:
+		return kimi.DeleteCachedHomeAuth(s.kimiAuthCacheRoot(), profileID)
 	default:
 		return fmt.Errorf("tool %q does not support cached auth deletion", tool)
 	}
@@ -1166,6 +1527,9 @@ func (s *Service) fetchUsageFromCachedAuthByTool(tool string, profileID string) 
 	case model.ToolClaude:
 		usage, auth, err := claude.FetchUsageFromCachedAuth(s.claudeAuthCacheRoot(), profileID)
 		return usage, auth, err
+	case model.ToolKimi:
+		usage, auth, err := kimi.FetchUsageFromCachedAuth(s.kimiAuthCacheRoot(), profileID)
+		return usage, auth, err
 	default:
 		return nil, nil, fmt.Errorf("tool %q does not support cached usage refresh", tool)
 	}
@@ -1176,6 +1540,8 @@ func profileAuthEmail(value any) string {
 	case *codex.ProfileAuth:
 		return auth.Email
 	case *claude.ProfileAuth:
+		return auth.Email
+	case *kimi.ProfileAuth:
 		return auth.Email
 	default:
 		return ""
@@ -1188,6 +1554,8 @@ func profileAuthAccountID(value any) string {
 		return auth.AccountID
 	case *claude.ProfileAuth:
 		return auth.AccountID
+	case *kimi.ProfileAuth:
+		return auth.AccountID
 	default:
 		return ""
 	}
@@ -1198,6 +1566,8 @@ func profileAuthPlan(value any) string {
 	case *codex.ProfileAuth:
 		return auth.Plan
 	case *claude.ProfileAuth:
+		return auth.Plan
+	case *kimi.ProfileAuth:
 		return auth.Plan
 	default:
 		return ""

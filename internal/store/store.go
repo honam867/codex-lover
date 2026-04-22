@@ -49,7 +49,9 @@ func DefaultConfig() model.Config {
 		Daemon: model.DaemonConfig{
 			ListenAddress: "127.0.0.1:47070",
 		},
-		Profiles: []model.Profile{},
+		Profiles:            []model.Profile{},
+		AutoRotateCodex:     false,
+		AutoRotateThreshold: 5.0,
 	}
 }
 
@@ -210,7 +212,13 @@ func (s *Store) loadConfigUnlocked() (model.Config, error) {
 		}
 		return cfg, nil
 	}
-	return cfg, err
+	if err != nil {
+		return model.Config{}, err
+	}
+	if cfg.AutoRotateThreshold == 0 {
+		cfg.AutoRotateThreshold = 5.0
+	}
+	return cfg, nil
 }
 
 func (s *Store) loadStateUnlocked() (model.State, error) {
