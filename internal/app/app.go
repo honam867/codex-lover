@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 	"time"
 
 	"codex-lover/internal/daemon"
-	"codex-lover/internal/desktop"
 	"codex-lover/internal/model"
 	"codex-lover/internal/service"
 	"codex-lover/internal/store"
@@ -31,51 +29,28 @@ func Run(ctx context.Context, args []string) error {
 	svc := service.New(st)
 
 	if len(args) == 0 {
-		return desktop.Run(ctx, svc)
+		return runStatusCommand(svc, st, false, false)
 	}
 
 	switch args[0] {
 	case "run":
-		return desktop.Run(ctx, svc)
+		return runServerCommand(ctx, svc, st, []string{"run"})
+	case "server":
+		return runServerCommand(ctx, svc, st, args[1:])
 	case "watch":
-		return desktop.Run(ctx, svc)
+		return runWatch(ctx, svc, st)
 	case "account":
 		return runAccountCommand(ctx, svc, st, args[1:])
 	case "profile":
-		return runProfileCommand(svc, args[1:])
+		return runProfileCommand(svc, st, args[1:])
 	case "refresh":
-		statuses, err := svc.RefreshAll()
-		if err != nil {
-			return err
-		}
-		printStatuses(statuses)
-		return nil
+		return runStatusCommand(svc, st, true, hasJSONFlag(args[1:]))
 	case "status":
-		statuses, err := svc.RefreshAll()
-		if err != nil {
-			return err
-		}
-		printStatuses(statuses)
-		return nil
+		return runStatusCommand(svc, st, false, hasJSONFlag(args[1:]))
 	case "daemon":
-		cfg, err := st.LoadConfig()
-		if err != nil {
-			return err
-		}
-		server := daemon.New(cfg.Daemon.ListenAddress, svc)
-		fmt.Printf("codex-lover daemon listening on http://%s\n", cfg.Daemon.ListenAddress)
-		return server.Run(ctx, time.Duration(cfg.PollIntervalSeconds)*time.Second)
+		return runServerCommand(ctx, svc, st, []string{"run"})
 	case "daemon-status":
-		cfg, err := st.LoadConfig()
-		if err != nil {
-			return err
-		}
-		statuses, err := fetchDaemonStatuses(cfg.Daemon.ListenAddress)
-		if err != nil {
-			return err
-		}
-		printStatuses(statuses)
-		return nil
+		return runStatusCommand(svc, st, false, hasJSONFlag(args[1:]))
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -85,37 +60,186 @@ func Run(ctx context.Context, args []string) error {
 	}
 }
 
+func runServerCommand(ctx context.Context, svc *service.Service, st *store.Store, args []string) error {
+	if len(args) == 0 {
+		args = []string{"run"}
+	}
+	switch args[0] {
+	case "run":
+		cfg, err := st.LoadConfig()
+		if err != nil {
+			return err
+		}
+		cleanupPID, err := registerManagedServerPID(st)
+		if err != nil {
+			return err
+		}
+		defer cleanupPID()
+		server := daemon.New(cfg.Daemon.ListenAddress, svc)
+		fmt.Printf("codex-lover server listening on http://%s\n", cfg.Daemon.ListenAddress)
+		return server.Run(ctx, time.Duration(cfg.PollIntervalSeconds)*time.Second)
+	case "start":
+		return startManagedServer(st)
+	case "stop":
+		return stopManagedServer(st)
+	case "status":
+		return printServerStatus(st)
+	default:
+		return fmt.Errorf("unknown server subcommand %q", args[0])
+	}
+}
+
+func runStatusCommand(svc *service.Service, st *store.Store, refresh bool, asJSON bool) error {
+	statuses, err := statusesForDisplay(svc, st, refresh)
+	if err != nil {
+		return err
+	}
+	statuses = codexStatuses(statuses)
+	if asJSON {
+		return printJSON(statuses)
+	}
+	printStatuses(statuses, svc)
+	return nil
+}
+
+func statusesForDisplay(svc *service.Service, st *store.Store, refresh bool) ([]model.ProfileStatus, error) {
+	address, err := ensureDaemonRunning(st)
+	if err == nil {
+		if refresh {
+			statuses, err := postDaemonRefresh(address)
+			if err == nil {
+				return statuses, nil
+			}
+			if !errors.Is(err, ErrDaemonUnavailable) {
+				return nil, err
+			}
+		} else {
+			statuses, err := fetchDaemonStatuses(address)
+			if err == nil {
+				return statuses, nil
+			}
+			if !errors.Is(err, ErrDaemonUnavailable) {
+				return nil, err
+			}
+		}
+	}
+	return svc.RefreshAll()
+}
+
 func runAccountCommand(ctx context.Context, svc *service.Service, st *store.Store, args []string) error {
 	if len(args) == 0 {
 		return errors.New("account command requires a subcommand")
 	}
 	switch args[0] {
 	case "add":
-		provider := model.ToolCodex
-		if len(args) > 1 {
-			provider = strings.ToLower(strings.TrimSpace(args[1]))
-		}
-		profile, err := addAccount(ctx, svc, st, provider)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("Added account %s (%s)\n", profileLabelOrID(profile), profile.HomePath)
-		return nil
+		return runAccountAdd(ctx, svc, st, args[1:])
+	case "list":
+		return runAccountList(svc, st, hasJSONFlag(args[1:]))
+	case "switch":
+		return runAccountSwitch(svc, st, args[1:])
+	case "remove", "delete":
+		return runAccountRemove(svc, st, args[1:])
 	default:
 		return fmt.Errorf("unknown account subcommand %q", args[0])
 	}
 }
 
-func runProfileCommand(svc *service.Service, args []string) error {
+func runAccountAdd(ctx context.Context, svc *service.Service, st *store.Store, args []string) error {
+	if len(args) > 0 {
+		provider := strings.ToLower(strings.TrimSpace(args[0]))
+		if provider != "" && provider != model.ToolCodex {
+			return fmt.Errorf("unsupported account provider %q", provider)
+		}
+	}
+	profile, err := addCodexAccount(ctx, svc, st)
+	if err != nil {
+		return err
+	}
+	_ = tryDaemonRefresh(st)
+	fmt.Printf("Added account %s (%s)\n", profileLabelOrID(profile), profile.HomePath)
+	return nil
+}
+
+func runAccountList(svc *service.Service, st *store.Store, asJSON bool) error {
+	statuses, err := statusesForDisplay(svc, st, false)
+	if err != nil {
+		return err
+	}
+	statuses = codexStatuses(statuses)
+	if asJSON {
+		return printJSON(statuses)
+	}
+	printAccountList(statuses, svc)
+	return nil
+}
+
+func runAccountSwitch(svc *service.Service, st *store.Store, args []string) error {
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return errors.New("usage: codex-lover account switch <profile-id>")
+	}
+	profileID := strings.TrimSpace(args[0])
+	address, err := ensureDaemonRunning(st)
+	if err == nil {
+		statuses, err := postDaemonSwitch(address, profileID)
+		if err == nil {
+			fmt.Printf("Switched active account to %s\n\n", profileID)
+			printAccountList(codexStatuses(statuses), svc)
+			return nil
+		}
+		if !errors.Is(err, ErrDaemonUnavailable) {
+			return err
+		}
+	}
+	if _, err := svc.ActivateProfile(profileID); err != nil {
+		return err
+	}
+	statuses, err := svc.RefreshAll()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Switched active account to %s\n\n", profileID)
+	printAccountList(codexStatuses(statuses), svc)
+	return nil
+}
+
+func runAccountRemove(svc *service.Service, st *store.Store, args []string) error {
+	if len(args) == 0 || strings.TrimSpace(args[0]) == "" {
+		return errors.New("usage: codex-lover account remove <profile-id>")
+	}
+	profileID := strings.TrimSpace(args[0])
+	address, err := ensureDaemonRunning(st)
+	if err == nil {
+		statuses, err := postDaemonRemove(address, profileID)
+		if err == nil {
+			fmt.Printf("Removed account %s\n\n", profileID)
+			printAccountList(codexStatuses(statuses), svc)
+			return nil
+		}
+		if !errors.Is(err, ErrDaemonUnavailable) {
+			return err
+		}
+	}
+	if _, err := svc.LogoutProfile(profileID); err != nil {
+		return err
+	}
+	statuses, err := svc.RefreshAll()
+	if err != nil {
+		return err
+	}
+	fmt.Printf("Removed account %s\n\n", profileID)
+	printAccountList(codexStatuses(statuses), svc)
+	return nil
+}
+
+func runProfileCommand(svc *service.Service, st *store.Store, args []string) error {
 	if len(args) == 0 {
 		return errors.New("profile command requires a subcommand")
 	}
 	switch args[0] {
 	case "import":
-		if len(args) < 2 || (args[1] != model.ToolCodex && args[1] != model.ToolClaude) {
-			return errors.New("usage: codex-lover profile import <codex|claude> --label NAME --home PATH")
+		if len(args) < 2 || args[1] != model.ToolCodex {
+			return errors.New("usage: codex-lover profile import codex --label NAME --home PATH")
 		}
-		tool := args[1]
 		label, homePath, err := parseImportFlags(args[2:])
 		if err != nil {
 			return err
@@ -127,27 +251,15 @@ func runProfileCommand(svc *service.Service, args []string) error {
 			}
 			homePath = abs
 		}
-		var profile model.Profile
-		switch tool {
-		case model.ToolCodex:
-			profile, err = svc.ImportCodexProfile(label, homePath)
-		case model.ToolClaude:
-			profile, err = svc.ImportClaudeProfile(label, homePath)
-		default:
-			err = fmt.Errorf("unsupported profile import tool %q", tool)
-		}
+		profile, err := svc.ImportCodexProfile(label, homePath)
 		if err != nil {
 			return err
 		}
+		_ = tryDaemonRefresh(st)
 		fmt.Printf("Imported profile %s (%s)\n", profileLabelOrID(profile), profile.HomePath)
 		return nil
 	case "list":
-		statuses, err := svc.ProfileStatuses()
-		if err != nil {
-			return err
-		}
-		printStatuses(statuses)
-		return nil
+		return runAccountList(svc, st, hasJSONFlag(args[1:]))
 	default:
 		return fmt.Errorf("unknown profile subcommand %q", args[0])
 	}
@@ -180,17 +292,6 @@ func parseImportFlags(args []string) (string, string, error) {
 	return label, home, nil
 }
 
-func addAccount(ctx context.Context, svc *service.Service, st *store.Store, provider string) (model.Profile, error) {
-	switch provider {
-	case "", model.ToolCodex:
-		return addCodexAccount(ctx, svc, st)
-	case model.ToolClaude:
-		return addClaudeAccount(ctx, svc, st)
-	default:
-		return model.Profile{}, fmt.Errorf("unsupported account provider %q", provider)
-	}
-}
-
 func addCodexAccount(ctx context.Context, svc *service.Service, st *store.Store) (model.Profile, error) {
 	basePath, homePath, err := prepareManagedCodexLoginHome(st.Root())
 	if err != nil {
@@ -202,36 +303,12 @@ func addCodexAccount(ctx context.Context, svc *service.Service, st *store.Store)
 
 	fmt.Println("Add Codex account")
 	fmt.Printf("Managed home: %s\n", homePath)
+	fmt.Println("Login mode: device code")
 
 	if err := launchCodexLogin(ctx, basePath, homePath); err != nil {
 		return model.Profile{}, err
 	}
 	profile, err := svc.AddManagedCodexAccount(homePath)
-	if err != nil {
-		return model.Profile{}, fmt.Errorf("login finished but account import failed: %w", err)
-	}
-	if _, err := svc.RefreshAll(); err != nil {
-		return model.Profile{}, err
-	}
-	return profile, nil
-}
-
-func addClaudeAccount(ctx context.Context, svc *service.Service, st *store.Store) (model.Profile, error) {
-	homePath, err := prepareManagedClaudeLoginHome(st.Root())
-	if err != nil {
-		return model.Profile{}, err
-	}
-	defer func() {
-		_ = os.RemoveAll(homePath)
-	}()
-
-	fmt.Println("Add Claude account")
-	fmt.Printf("Managed home: %s\n", homePath)
-
-	if err := launchClaudeLogin(ctx, homePath); err != nil {
-		return model.Profile{}, err
-	}
-	profile, err := svc.AddManagedClaudeAccount(homePath)
 	if err != nil {
 		return model.Profile{}, fmt.Errorf("login finished but account import failed: %w", err)
 	}
@@ -276,48 +353,26 @@ func prepareManagedCodexLoginHome(storeRoot string) (string, string, error) {
 	return basePath, homePath, nil
 }
 
-func prepareManagedClaudeLoginHome(storeRoot string) (string, error) {
-	root := filepath.Join(storeRoot, "homes", "claude")
-	if err := os.MkdirAll(root, 0o700); err != nil {
-		return "", fmt.Errorf("create managed Claude homes root: %w", err)
-	}
-
-	var homePath string
-	for attempt := 0; attempt < 100; attempt++ {
-		name := time.Now().UTC().Format("20060102-150405")
-		if attempt > 0 {
-			name += "-" + strconv.Itoa(attempt+1)
-		}
-		candidate := filepath.Join(root, name)
-		if _, err := os.Stat(candidate); err == nil {
-			continue
-		} else if !os.IsNotExist(err) {
-			return "", err
-		}
-		if err := os.MkdirAll(candidate, 0o700); err != nil {
-			return "", fmt.Errorf("create managed Claude login home: %w", err)
-		}
-		homePath = candidate
-		break
-	}
-	if homePath == "" {
-		return "", errors.New("could not allocate managed Claude login home")
-	}
-	return homePath, nil
-}
-
 func launchCodexLogin(ctx context.Context, basePath string, homePath string) error {
 	cmdPath, err := resolveCodexLoginCommand()
 	if err != nil {
 		return err
 	}
 
-	fmt.Println("Starting `codex login`...")
-	if err := os.MkdirAll(filepath.Join(basePath, "tmp"), 0o700); err != nil {
+	fmt.Println("Starting `codex login --device-auth`...")
+	tmpDir := filepath.Join(basePath, "tmp")
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return fmt.Errorf("create managed Codex temp dir: %w", err)
 	}
 
-	cmd := exec.CommandContext(ctx, "cmd.exe", "/d", "/c", cmdPath, "login")
+	cmd := exec.CommandContext(
+		ctx,
+		cmdPath,
+		"login",
+		"--device-auth",
+		"-c",
+		`cli_auth_credentials_store="file"`,
+	)
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -331,67 +386,21 @@ func launchCodexLogin(ctx context.Context, basePath string, homePath string) err
 	return nil
 }
 
-func launchClaudeLogin(ctx context.Context, homePath string) error {
-	cmdPath, err := resolveClaudeLoginCommand()
-	if err != nil {
-		return err
-	}
-
-	fmt.Println("Starting `claude auth login`...")
-	cmd := exec.CommandContext(ctx, "cmd.exe", "/d", "/c", cmdPath, "auth", "login", "--claudeai")
-	cmd.Stdin = os.Stdin
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	cmd.Env = claudeLoginEnv(homePath)
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("run claude auth login: %w", err)
-	}
-	if _, err := os.Stat(filepath.Join(homePath, ".credentials.json")); err != nil {
-		return fmt.Errorf("claude auth login finished but %s was not created", filepath.Join(homePath, ".credentials.json"))
-	}
-	return nil
-}
-
 func resolveCodexLoginCommand() (string, error) {
-	for _, candidate := range []string{"codex.cmd", "codex"} {
-		if path, err := exec.LookPath(candidate); err == nil {
-			return path, nil
-		}
+	if path, err := exec.LookPath("codex"); err == nil {
+		return path, nil
 	}
 	return "", errors.New("could not locate Codex CLI")
 }
 
-func resolveClaudeLoginCommand() (string, error) {
-	for _, candidate := range []string{"claude.exe", "claude"} {
-		if path, err := exec.LookPath(candidate); err == nil {
-			return path, nil
-		}
-	}
-	return "", errors.New("could not locate Claude CLI")
-}
-
 func codexLoginEnv(basePath string, homePath string) []string {
 	env := os.Environ()
+	tmpDir := filepath.Join(basePath, "tmp")
 	env = setEnvValue(env, "HOME", basePath)
-	env = setEnvValue(env, "USERPROFILE", basePath)
 	env = setEnvValue(env, "CODEX_HOME", homePath)
-	env = setEnvValue(env, "TEMP", filepath.Join(basePath, "tmp"))
-	env = setEnvValue(env, "TMP", filepath.Join(basePath, "tmp"))
-
-	volume := filepath.VolumeName(basePath)
-	rest := strings.TrimPrefix(basePath, volume)
-	if volume != "" {
-		env = setEnvValue(env, "HOMEDRIVE", volume)
-	}
-	if rest != "" {
-		env = setEnvValue(env, "HOMEPATH", rest)
-	}
-	return env
-}
-
-func claudeLoginEnv(homePath string) []string {
-	env := os.Environ()
-	env = setEnvValue(env, "CLAUDE_CONFIG_DIR", homePath)
+	env = setEnvValue(env, "TMPDIR", tmpDir)
+	env = setEnvValue(env, "TMP", tmpDir)
+	env = setEnvValue(env, "TEMP", tmpDir)
 	return env
 }
 
@@ -410,25 +419,10 @@ func setEnvValue(env []string, key string, value string) []string {
 	return env
 }
 
-func fetchDaemonStatuses(address string) ([]model.ProfileStatus, error) {
-	resp, err := http.Get("http://" + address + "/v1/status")
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("daemon returned %s", resp.Status)
-	}
-	var statuses []model.ProfileStatus
-	if err := json.NewDecoder(resp.Body).Decode(&statuses); err != nil {
-		return nil, err
-	}
-	return statuses, nil
-}
-
-func printStatuses(statuses []model.ProfileStatus) {
+func printStatuses(statuses []model.ProfileStatus, svc *service.Service) {
+	statuses = codexStatuses(statuses)
 	if len(statuses) == 0 {
-		fmt.Println("No profiles imported yet.")
+		fmt.Println("No Codex profiles imported yet.")
 		return
 	}
 
@@ -437,13 +431,19 @@ func printStatuses(statuses []model.ProfileStatus) {
 		if i > 0 {
 			fmt.Println()
 		}
+		primaryWindow := profileStatusPrimary(item)
+		secondaryWindow := profileStatusSecondary(item)
 		fmt.Println(profileLabelOrID(item.Profile))
+		fmt.Printf("  id: %s\n", item.Profile.ID)
 		fmt.Printf("  email: %s\n", emptyDash(item.Profile.Email))
 		fmt.Printf("  plan: %s\n", emptyDash(profileStatusPlan(item)))
 		fmt.Printf("  auth: %s\n", emptyDash(item.State.AuthStatus))
 		fmt.Printf("  freshness: %s\n", profileFreshness(item))
-		fmt.Printf("  5h: %s\n", formatWindowText(profileStatusPrimary(item), item.State.AuthStatus, now))
-		fmt.Printf("  weekly: %s\n", formatWindowText(profileStatusSecondary(item), item.State.AuthStatus, now))
+		if item.State.AuthStatus != model.AuthStatusActive && svc != nil {
+			fmt.Printf("  switchable: %s\n", yesNo(svc.HasCachedAuth(item.Profile.ID)))
+		}
+		fmt.Printf("  %s: %s\n", windowDisplayLabel(primaryWindow, "primary"), formatWindowText(primaryWindow, item.State.AuthStatus, now))
+		fmt.Printf("  %s: %s\n", windowDisplayLabel(secondaryWindow, "weekly"), formatWindowText(secondaryWindow, item.State.AuthStatus, now))
 		fmt.Printf("  credits: %s\n", service.FormatCredits(profileStatusCredits(item)))
 		if item.State.LastRefreshedAt != nil {
 			fmt.Printf("  refreshed: %s\n", item.State.LastRefreshedAt.Local().Format("2006-01-02 15:04:05"))
@@ -452,6 +452,40 @@ func printStatuses(statuses []model.ProfileStatus) {
 			fmt.Printf("  error: %s\n", item.State.LastError)
 		}
 	}
+}
+
+func printAccountList(statuses []model.ProfileStatus, svc *service.Service) {
+	statuses = codexStatuses(statuses)
+	if len(statuses) == 0 {
+		fmt.Println("No Codex accounts imported yet.")
+		return
+	}
+	now := time.Now()
+	for _, item := range statuses {
+		marker := " "
+		if item.State.AuthStatus == model.AuthStatusActive {
+			marker = "*"
+		}
+		primaryWindow := profileStatusPrimary(item)
+		secondaryWindow := profileStatusSecondary(item)
+		fmt.Printf("%s %s\n", marker, profileLabelOrID(item.Profile))
+		fmt.Printf("  id: %s\n", item.Profile.ID)
+		fmt.Printf("  auth: %s\n", emptyDash(item.State.AuthStatus))
+		if item.State.AuthStatus != model.AuthStatusActive && svc != nil {
+			fmt.Printf("  switchable: %s\n", yesNo(svc.HasCachedAuth(item.Profile.ID)))
+		}
+		fmt.Printf("  %s: %s\n", windowDisplayLabel(primaryWindow, "primary"), formatWindowText(primaryWindow, item.State.AuthStatus, now))
+		fmt.Printf("  %s: %s\n", windowDisplayLabel(secondaryWindow, "weekly"), formatWindowText(secondaryWindow, item.State.AuthStatus, now))
+	}
+}
+
+func printJSON(value any) error {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		return err
+	}
+	fmt.Println(string(data))
+	return nil
 }
 
 func formatWindowText(window *model.UsageWindow, authStatus string, now time.Time) string {
@@ -480,19 +514,45 @@ func formatWindowText(window *model.UsageWindow, authStatus string, now time.Tim
 func printUsage() {
 	fmt.Println("codex-lover")
 	fmt.Println()
-	fmt.Println("Commands:")
-	fmt.Println("  run")
+	fmt.Println("Ubuntu headless commands:")
+	fmt.Println("  server run")
+	fmt.Println("  server start")
+	fmt.Println("  server stop")
+	fmt.Println("  server status")
+	fmt.Println("  status [--json]")
+	fmt.Println("  refresh [--json]")
 	fmt.Println("  watch")
-	fmt.Println("  account add [codex|claude]")
-	fmt.Println("  profile import <codex|claude> --label NAME --home PATH")
-	fmt.Println("  profile list")
-	fmt.Println("  refresh")
-	fmt.Println("  status")
-	fmt.Println("  daemon")
-	fmt.Println("  daemon-status")
+	fmt.Println("  account add [codex]")
+	fmt.Println("  account list [--json]")
+	fmt.Println("  account switch <profile-id>")
+	fmt.Println("  account remove <profile-id>")
+	fmt.Println("  profile import codex --label NAME --home PATH")
+	fmt.Println("  profile list [--json]")
+}
+
+func hasJSONFlag(args []string) bool {
+	for _, arg := range args {
+		if strings.TrimSpace(arg) == "--json" {
+			return true
+		}
+	}
+	return false
+}
+
+func codexStatuses(statuses []model.ProfileStatus) []model.ProfileStatus {
+	filtered := make([]model.ProfileStatus, 0, len(statuses))
+	for _, status := range statuses {
+		if status.Profile.Tool == model.ToolCodex {
+			filtered = append(filtered, status)
+		}
+	}
+	return filtered
 }
 
 func profileLabelOrID(p model.Profile) string {
+	if strings.TrimSpace(p.Email) != "" {
+		return p.Email
+	}
 	if p.Label != "" {
 		return p.Label
 	}
@@ -545,4 +605,30 @@ func emptyDash(value string) string {
 		return "-"
 	}
 	return value
+}
+
+func yesNo(value bool) string {
+	if value {
+		return "yes"
+	}
+	return "no"
+}
+
+func windowDisplayLabel(window *model.UsageWindow, fallback string) string {
+	if window == nil || window.WindowMinutes <= 0 {
+		return fallback
+	}
+	switch window.WindowMinutes {
+	case 5 * 60:
+		return "5h"
+	case 7 * 24 * 60:
+		return "weekly"
+	}
+	if window.WindowMinutes%(24*60) == 0 {
+		return fmt.Sprintf("%dd", window.WindowMinutes/(24*60))
+	}
+	if window.WindowMinutes%60 == 0 {
+		return fmt.Sprintf("%dh", window.WindowMinutes/60)
+	}
+	return fmt.Sprintf("%dm", window.WindowMinutes)
 }

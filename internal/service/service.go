@@ -140,13 +140,7 @@ func (s *Service) RefreshAllWithOptions(opts RefreshOptions) ([]model.ProfileSta
 	if err := s.normalizeManagedCodexProfiles(); err != nil {
 		return nil, err
 	}
-	if err := s.normalizeManagedClaudeProfiles(); err != nil {
-		return nil, err
-	}
-	if err := s.ensureDefaultClaudeProfile(); err != nil {
-		return nil, err
-	}
-	if err := s.normalizeAnonymousClaudeProfiles(); err != nil {
+	if err := s.ensureDefaultCodexProfile(); err != nil {
 		return nil, err
 	}
 	if err := s.normalizeDuplicateCodexProfiles(); err != nil {
@@ -362,13 +356,7 @@ func (s *Service) ProfileStatuses() ([]model.ProfileStatus, error) {
 	if err := s.normalizeManagedCodexProfiles(); err != nil {
 		return nil, err
 	}
-	if err := s.normalizeManagedClaudeProfiles(); err != nil {
-		return nil, err
-	}
-	if err := s.ensureDefaultClaudeProfile(); err != nil {
-		return nil, err
-	}
-	if err := s.normalizeAnonymousClaudeProfiles(); err != nil {
+	if err := s.ensureDefaultCodexProfile(); err != nil {
 		return nil, err
 	}
 	if err := s.normalizeDuplicateCodexProfiles(); err != nil {
@@ -387,13 +375,7 @@ func (s *Service) LogoutProfile(profileID string) (LogoutResult, error) {
 	if err := s.normalizeManagedCodexProfiles(); err != nil {
 		return LogoutResult{}, err
 	}
-	if err := s.normalizeManagedClaudeProfiles(); err != nil {
-		return LogoutResult{}, err
-	}
-	if err := s.ensureDefaultClaudeProfile(); err != nil {
-		return LogoutResult{}, err
-	}
-	if err := s.normalizeAnonymousClaudeProfiles(); err != nil {
+	if err := s.ensureDefaultCodexProfile(); err != nil {
 		return LogoutResult{}, err
 	}
 	if err := s.normalizeDuplicateCodexProfiles(); err != nil {
@@ -469,13 +451,7 @@ func (s *Service) ActivateProfile(profileID string) (ActivateResult, error) {
 	if err := s.normalizeManagedCodexProfiles(); err != nil {
 		return ActivateResult{}, err
 	}
-	if err := s.normalizeManagedClaudeProfiles(); err != nil {
-		return ActivateResult{}, err
-	}
-	if err := s.ensureDefaultClaudeProfile(); err != nil {
-		return ActivateResult{}, err
-	}
-	if err := s.normalizeAnonymousClaudeProfiles(); err != nil {
+	if err := s.ensureDefaultCodexProfile(); err != nil {
 		return ActivateResult{}, err
 	}
 	if err := s.normalizeDuplicateCodexProfiles(); err != nil {
@@ -930,6 +906,50 @@ func (s *Service) ensureDefaultClaudeProfile() error {
 	}
 
 	return s.store.UpsertProfile(claude.ObservedProfileFromAuth(homePath, auth))
+}
+
+func (s *Service) ensureDefaultCodexProfile() error {
+	homePath, err := s.defaultCodexHome()
+	if err != nil {
+		return err
+	}
+	auth, err := codex.LoadProfileAuth(homePath)
+	if err != nil {
+		return nil
+	}
+	cfg, err := s.store.LoadConfig()
+	if err != nil {
+		return err
+	}
+	for _, profile := range cfg.Profiles {
+		if profile.Tool != model.ToolCodex {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(profile.HomePath), strings.TrimSpace(homePath)) {
+			continue
+		}
+		if strings.TrimSpace(profile.Email) != "" || strings.TrimSpace(profile.AccountID) != "" {
+			continue
+		}
+		profile.Label = chooseNonEmpty(codex.ObservedProfileFromAuth(homePath, auth).Label, profile.Label)
+		profile.Email = chooseNonEmpty(auth.Email, profile.Email)
+		profile.AccountID = chooseNonEmpty(auth.AccountID, profile.AccountID)
+		profile.Plan = chooseNonEmpty(auth.Plan, profile.Plan)
+		profile.Provider = chooseNonEmpty(model.ToolCodex, profile.Provider)
+		profile.UpdatedAt = time.Now().UTC()
+		return s.store.UpsertProfile(profile)
+	}
+
+	for _, profile := range cfg.Profiles {
+		if profile.Tool != model.ToolCodex {
+			continue
+		}
+		if profileMatchesAuth(profile, auth.AccountID, auth.Email) {
+			return nil
+		}
+	}
+
+	return s.store.UpsertProfile(codex.ObservedProfileFromAuth(homePath, auth))
 }
 
 func (s *Service) normalizeDuplicateCodexProfiles() error {

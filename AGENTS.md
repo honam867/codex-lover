@@ -4,25 +4,44 @@ This file is for coding agents working on `codex-lover`.
 
 Read this file first if you need to:
 
-- install the project from scratch
-- get the app running on a fresh Windows machine
-- understand what the product currently does
-- explain usage to another user
-- modify the current desktop-first architecture safely
+- understand the Ubuntu branch quickly
+- install the project from scratch on another Ubuntu machine
+- explain the product to a user
+- modify the supported command surface safely
+- debug daemon, account, watch, or OpenCode sync behavior
+
+## Branch Scope
+
+This branch is Ubuntu-first and headless.
+
+Current supported model:
+
+- background daemon
+- CLI commands
+- terminal dashboard
+- local JSON/API integration
+
+Out of scope for this branch:
+
+- Windows setup instructions
+- Windows desktop UX documentation
+- telling users to rely on a desktop app as the primary workflow
+
+If you see old desktop or Windows-specific code in the repo, do not document it as the supported flow for this branch unless the user explicitly asks about another branch.
 
 ## What This Project Is
 
-`codex-lover` is a Windows-first desktop manager for multi-account Codex usage.
+`codex-lover` manages multi-account Codex usage on Ubuntu.
 
-It exists to solve a specific workflow problem:
+The problem it solves:
 
-- users may have multiple Codex accounts
-- only one account is active in the runtime auth file at a time
-- manually switching accounts is tedious
-- logged-out accounts still matter because their last known usage and reset time matter
-- OpenCode can drift away from the currently active Codex account
+- only one Codex account can be active in `~/.codex/auth.json` at once
+- people may use multiple Codex accounts
+- manual switching is annoying
+- logged-out accounts still matter because their cached quota and reset times matter
+- OpenCode can drift onto a different account than the currently active Codex auth
 
-`codex-lover` keeps a local account registry, tracks usage, preserves logged-out accounts in the UI, syncs OpenCode, and auto-switches Codex when the active account reaches limit.
+`codex-lover` keeps a local registry of known accounts, caches switchable auth, refreshes usage, preserves logged-out account visibility, auto-switches when the active account is limited, and keeps OpenCode aligned to the active Codex account.
 
 ## Current Product Model
 
@@ -30,363 +49,378 @@ Current source of truth:
 
 - Codex is the source of truth.
 - OpenCode follows Codex.
-- The desktop app is the main live control loop.
+- The daemon is the main live control loop.
 
 Current UX model:
 
-- `codex-lover` opens the desktop app
-- `codex-lover run` opens the desktop app
-- `codex-lover watch` also opens the desktop app for compatibility
-- `codex-lover status` and `codex-lover refresh` remain plain text commands
+- `codex-lover` with no args prints one-shot status
+- `codex-lover server run` runs the daemon in the foreground
+- `codex-lover server start` runs it in the background
+- `codex-lover watch` is the live terminal dashboard
+- `codex-lover account ...` manages accounts from the shell
+- JSON and HTTP API endpoints are supported for integrations
 
-The old terminal watch UI is no longer the primary interface.
+Important limitation:
 
-## What The App Currently Does
+- visible is not the same as switchable
+- an account is only switchable if cached auth exists for it, or for another equivalent profile representing the same account
+- auto-switch only works when another cached account has usable quota
 
-When the desktop app is open, it:
+## User-Facing Features
 
-1. refreshes active usage every 15 seconds
-2. refreshes logged-out accounts with cached auth every 15 minutes
-3. shows all known accounts in a card grid
-4. marks one account as `ACTIVE`
-5. keeps logged-out accounts visible as `LOGGED_OUT`
-6. keeps last known usage for logged-out accounts
-7. infers reset recovery for logged-out accounts when reset time passes
-8. notifies at 20% and 10% thresholds
-9. auto-switches to another cached account if the active account reaches limit
-10. syncs OpenCode to the active Codex account
+Current supported features:
 
-## Important Product Limitation
+- background daemon with foreground and managed-background modes
+- `status` and `refresh` in text or JSON
+- colorized `watch` dashboard with `5h` and `weekly` bars for every account
+- `account add` through isolated `codex login --device-auth`
+- `account list`
+- `account switch`
+- `account remove` and `account delete`
+- `profile import codex --label NAME --home PATH`
+- `profile list`
+- auto-switch on limit
+- OpenCode sync from active Codex account
+- local HTTP API for status and account actions
 
-Auto-switch only works for accounts whose Codex auth has already been cached locally.
+## Fresh Ubuntu Setup Playbook
 
-That means:
+This is the direct playbook another agent should follow on a new Ubuntu machine.
 
-- an active account becomes switchable automatically
-- a logged-out account can appear in the UI with cached usage
-- but it cannot be switched into unless cached auth exists for that account
+### 1. Open the repo
 
-Do not describe “visible in the app” as equivalent to “switchable”.
-
-## Environment Assumptions
-
-Working environment on the target machine:
-
-- Windows
-- PowerShell
-- Go installed
-- Node.js + npm installed
-- Wails CLI installed
-- WebView2 runtime installed
-- Codex installed and logged in at least once
-
-Observed paths on the current machine:
-
-- Codex auth: `C:\Users\Admin\.codex\auth.json`
-- OpenCode auth: `C:\Users\Admin\.local\share\opencode\auth.json`
-- codex-lover runtime state: `C:\Users\Admin\.codex-lover`
-- installed binaries: `C:\Users\Admin\AppData\Local\codex-lover\bin`
-
-Always verify paths if the machine differs.
-
-## Repo Layout
-
-Top-level files:
-
-- [README.md](D:\working\codex-lover\README.md): end-user documentation
-- [AGENTS.md](D:\working\codex-lover\AGENTS.md): this file
-- [PLAN.desktop-app.md](D:\working\codex-lover\PLAN.desktop-app.md): desktop plan/history
-- [install.cmd](D:\working\codex-lover\install.cmd): Windows wrapper
-- [install.ps1](D:\working\codex-lover\install.ps1): build and install script
-
-CLI:
-
-- [main.go](D:\working\codex-lover\cmd\codex-lover\main.go)
-- [app.go](D:\working\codex-lover\internal\app\app.go)
-
-Desktop launcher:
-
-- [app.go](D:\working\codex-lover\internal\desktop\app.go)
-
-Desktop app:
-
-- [main.go](D:\working\codex-lover\desktop-app\main.go)
-- [app.go](D:\working\codex-lover\desktop-app\app.go)
-- [runtime.go](D:\working\codex-lover\desktop-app\runtime.go)
-- [notifications.go](D:\working\codex-lover\desktop-app\notifications.go)
-- [App.tsx](D:\working\codex-lover\desktop-app\frontend\src\App.tsx)
-- [style.css](D:\working\codex-lover\desktop-app\frontend\src\style.css)
-
-Core backend packages:
-
-- [service.go](D:\working\codex-lover\internal\service\service.go)
-- [types.go](D:\working\codex-lover\internal\model\types.go)
-- [auth.go](D:\working\codex-lover\internal\codex\auth.go)
-- [usage.go](D:\working\codex-lover\internal\codex\usage.go)
-- [cache.go](D:\working\codex-lover\internal\codex\cache.go)
-- [sync.go](D:\working\codex-lover\internal\opencode\sync.go)
-- [notify.go](D:\working\codex-lover\internal\notify\notify.go)
-
-## Setup From Scratch
-
-This section is the direct playbook another agent should follow.
-
-### 1. Clone or open the repo
-
-```powershell
+```bash
 git clone https://github.com/honam867/codex-lover.git
 cd codex-lover
 ```
 
-If git is unavailable, copy the repo to a writable folder.
+If the repo is already present, just open it in a writable working directory.
 
 ### 2. Verify Go
 
-```powershell
+```bash
 go version
 ```
 
-If that fails, install Go first.
+If Go is missing:
 
-### 3. Verify Node and npm
-
-```powershell
-node -v
-npm -v
+```bash
+sudo apt update
+sudo apt install -y golang-go
 ```
 
-If either fails, install Node.js first.
+### 3. Verify Codex CLI
 
-### 4. Install Wails CLI
-
-```powershell
-go install github.com/wailsapp/wails/v2/cmd/wails@latest
+```bash
+codex --version
 ```
 
-Optional verification:
+If this fails, stop and fix Codex installation first.
 
-```powershell
-wails doctor
+### 4. Verify a base Codex login already exists
+
+```bash
+test -f ~/.codex/auth.json && echo ok || echo missing
 ```
 
-### 5. Verify Codex auth exists
-
-```powershell
-Test-Path "$env:USERPROFILE\.codex\auth.json"
-```
-
-If false:
+If the file is missing:
 
 - open Codex normally
 - log in once
-- confirm the auth file exists
+- confirm `~/.codex/auth.json` exists
 
-### 6. Optional: verify OpenCode auth
+### 5. Optional: verify OpenCode
 
-```powershell
-Test-Path "$env:USERPROFILE\.local\share\opencode\auth.json"
+```bash
+test -f ~/.local/share/opencode/auth.json && echo present || echo missing
 ```
 
-OpenCode is optional, but if it exists the app can sync it automatically.
+OpenCode is optional. The sync code can create or update the file later when an active Codex account exists.
 
-### 7. Build and install the project
+### 6. Install codex-lover
 
-From repo root:
-
-```powershell
-.\install.cmd
+```bash
+bash ./install.sh
 ```
 
-or:
+What the install script does right now:
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+- builds `./cmd/codex-lover`
+- installs the binary to `~/.local/bin/codex-lover`
+- appends a `.bashrc` auto-start snippet if absent
+- starts the background daemon once immediately
+- writes daemon logs to `~/.codex-lover/logs/server.log`
+
+### 7. Verify `PATH`
+
+```bash
+which codex-lover
 ```
 
-The installer currently does all of this:
+If that prints nothing, add this to the shell config:
 
-- runs `wails build -clean` in `desktop-app`
-- builds the CLI launcher
-- installs `codex-lover.exe`
-- installs `codex-lover-desktop.exe`
-- creates `codex-lover.cmd`
-- updates user `PATH` if needed
-
-### 8. Open the app
-
-```powershell
-codex-lover
+```bash
+export PATH="$HOME/.local/bin:$PATH"
 ```
 
-or:
+Then reload the shell.
 
-```powershell
-codex-lover run
+Important:
+
+- `install.sh` only edits `.bashrc`
+- if the user uses `zsh` or `fish`, either add the same logic there or use systemd user service startup instead
+
+### 8. Verify the daemon
+
+```bash
+codex-lover server status
 ```
 
 Expected result:
 
-- the desktop app opens
-- account cards render
-- active account appears as `ACTIVE`
+- `server: running`
+- `address: http://127.0.0.1:47070`
+- a valid pid
+- a log path under `~/.codex-lover/logs/server.log`
 
-### 9. Add another account
+### 9. Verify the CLI views
 
-Inside the app:
+```bash
+codex-lover status
+codex-lover account list
+codex-lover watch
+```
 
-- click `Add account`
+Expected result:
+
+- `status` prints one-shot text output
+- `account list` prints `id`, `auth`, `switchable`, `5h`, and `weekly`
+- `watch` opens a colorized live terminal dashboard
+
+### 10. Add another account
+
+```bash
+codex-lover account add
+```
 
 Expected flow:
 
-- a separate console opens
-- it runs `codex-lover account add`
-- Codex browser/device login opens
-- after login succeeds, refresh the desktop app
+- `codex-lover` creates an isolated managed login home under `~/.codex-lover/homes/codex/...`
+- it runs `codex login --device-auth`
+- login completes in the terminal/device-auth flow
+- the new account is imported and cached
+- temporary managed login files are cleaned up
 
-### 10. Verify CLI summary still works
+### 11. Verify manual account management
 
-```powershell
-codex-lover status
+List accounts:
+
+```bash
+codex-lover account list
 ```
 
-Expected result:
+Switch using the chosen id:
 
-- a plain text summary of known profiles
-- no old terminal card UI
+```bash
+codex-lover account switch <profile-id>
+```
+
+Remove using the chosen id:
+
+```bash
+codex-lover account remove <profile-id>
+```
+
+### 12. Optional: enable systemd user service
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp docs/systemd/codex-lover.service ~/.config/systemd/user/codex-lover.service
+systemctl --user daemon-reload
+systemctl --user enable --now codex-lover
+```
+
+Logs:
+
+```bash
+journalctl --user -fu codex-lover
+```
 
 ## How To Explain Usage To A User
 
-If another agent needs to explain usage quickly, use this model:
+If another agent needs a quick explanation, use this model:
 
-- `codex-lover` opens the desktop app
-- `Add account` adds another Codex account without logging out the current one first
-- `Log in` on a card makes that cached account active
-- `Delete` removes cached auth and local account data for that account
-- the app refreshes automatically
-- notifications fire at 20% and 10%
-- auto-switch happens when the active account reaches limit
-- OpenCode is kept aligned with the active Codex account
+- `codex-lover` shows current account state
+- `codex-lover server start` keeps automation running in the background
+- `codex-lover watch` is the live dashboard
+- `codex-lover account add` adds another account without logging out the current one first
+- `codex-lover account switch <profile-id>` makes a cached account active
+- `codex-lover account remove <profile-id>` removes local data and cached auth for that account
+- auto-switch happens when the active account reaches limit and another cached account is ready
+- OpenCode follows the active Codex account automatically
 
-## Runtime Files And Data
+Do not tell users that any visible account can always be switched into. Switchability depends on cached auth.
 
-These files live outside the repo:
+## Command Surface
 
-- `%USERPROFILE%\.codex\auth.json`
-- `%USERPROFILE%\.local\share\opencode\auth.json`
-- `%USERPROFILE%\.codex-lover\config.json`
-- `%USERPROFILE%\.codex-lover\state.json`
-- `%USERPROFILE%\.codex-lover\codex-auth\*.json`
-- `%USERPROFILE%\.codex-lover\homes\codex\`
+Primary commands:
 
-Do not commit or print real tokens from these files.
-
-It is acceptable to inspect:
-
-- email
-- account id
-- expiry timestamps
-- provider names
-- file existence
-
-## Development Workflow
-
-Recommended loop:
-
-```powershell
-go test ./...
-.\install.cmd
-codex-lover run
+```bash
+codex-lover
+codex-lover help
+codex-lover status
+codex-lover status --json
+codex-lover refresh
+codex-lover refresh --json
+codex-lover watch
+codex-lover server run
+codex-lover server start
+codex-lover server stop
+codex-lover server status
+codex-lover account add
+codex-lover account list
+codex-lover account list --json
+codex-lover account switch <profile-id>
+codex-lover account remove <profile-id>
+codex-lover profile import codex --label NAME --home PATH
+codex-lover profile list
 ```
 
-If you only need the desktop app build:
+Compatibility aliases also exist:
 
-```powershell
-cd .\desktop-app
-wails build -clean
-```
+- `codex-lover run` -> `server run`
+- `codex-lover daemon` -> `server run`
+- `codex-lover daemon-status` -> `status`
 
-If frontend changes do not appear, rebuild and reinstall.
+## Runtime And Data Files
 
-## Current Build Model
+Important files outside the repo:
 
-This matters because the desktop app is not the same executable as the CLI launcher.
+- `~/.codex/auth.json`: active runtime Codex auth
+- `~/.local/share/opencode/auth.json`: OpenCode auth file that follows Codex
+- `~/.codex-lover/config.json`: config and registered profiles
+- `~/.codex-lover/state.json`: cached profile state and usage data
+- `~/.codex-lover/codex-auth/`: cached auth used for switch and auto-switch
+- `~/.codex-lover/homes/codex/`: temporary managed login homes for `account add`
+- `~/.codex-lover/logs/server.log`: managed daemon log
+- `~/.codex-lover/server.pid`: managed daemon pid file
 
-Current install output:
+Config defaults from code:
 
-- `codex-lover.exe`: CLI launcher and command entrypoint
-- `codex-lover-desktop.exe`: actual desktop app window
+- `poll_interval_seconds`: `15`
+- `daemon.listen_address`: `127.0.0.1:47070`
 
-Current behavior:
+## Repo Layout
 
-- `codex-lover run` launches `codex-lover-desktop.exe`
-- the installer must rebuild both parts
+Top-level docs and install files:
 
-Do not collapse these two executables unless you intentionally redesign the packaging model.
+- [README.md](./README.md): end-user Ubuntu documentation
+- [AGENTS.md](./AGENTS.md): this file
+- [docs/ubuntu.md](./docs/ubuntu.md): shorter Ubuntu quick reference
+- [install.sh](./install.sh): user-space Ubuntu install flow
+- [docs/systemd/codex-lover.service](./docs/systemd/codex-lover.service): sample systemd user unit
 
-## Common Maintenance Tasks
+CLI and command routing:
 
-### Change desktop UI
+- [cmd/codex-lover/main.go](./cmd/codex-lover/main.go): CLI entrypoint
+- [internal/app/app.go](./internal/app/app.go): command routing, status output, account and profile commands
+- [internal/app/watch.go](./internal/app/watch.go): live terminal dashboard rendering
+- [internal/app/server_manage.go](./internal/app/server_manage.go): background daemon start/stop/status
+- [internal/app/remote.go](./internal/app/remote.go): daemon client used by CLI commands
 
-Start here:
+Daemon and core logic:
 
-- [App.tsx](D:\working\codex-lover\desktop-app\frontend\src\App.tsx)
-- [style.css](D:\working\codex-lover\desktop-app\frontend\src\style.css)
+- [internal/daemon/server.go](./internal/daemon/server.go): HTTP API and runtime loop
+- [internal/service/service.go](./internal/service/service.go): refresh, activation, logout, auto-switch, OpenCode sync wiring
+- [internal/store/store.go](./internal/store/store.go): persistent config and state storage
+- [internal/model/types.go](./internal/model/types.go): config/state/profile data model
 
-### Change desktop live behavior
+Codex and OpenCode integration:
 
-Start here:
+- [internal/codex/auth.go](./internal/codex/auth.go): load runtime auth and derive profile identity
+- [internal/codex/usage.go](./internal/codex/usage.go): fetch usage data
+- [internal/codex/cache.go](./internal/codex/cache.go): cache and restore auth files
+- [internal/opencode/sync.go](./internal/opencode/sync.go): sync active Codex OAuth tokens into OpenCode auth
 
-- [runtime.go](D:\working\codex-lover\desktop-app\runtime.go)
-- [notifications.go](D:\working\codex-lover\desktop-app\notifications.go)
+## Maintenance Entry Points
 
-### Change business logic
+When changing user-facing commands:
 
-Start here:
+- start with `internal/app/app.go`
 
-- [service.go](D:\working\codex-lover\internal\service\service.go)
+When changing the live dashboard:
 
-Relevant methods:
+- start with `internal/app/watch.go`
+
+When changing background daemon lifecycle:
+
+- start with `internal/app/server_manage.go`
+- also inspect `internal/app/remote.go`
+
+When changing poll behavior, API output, or automation flow:
+
+- start with `internal/daemon/server.go`
+
+When changing business rules:
+
+- start with `internal/service/service.go`
+
+Key methods to know:
 
 - `RefreshAll`
 - `RefreshLoggedOutCachedUsage`
-- `AutoSwitchLimitedCodex`
-- `SyncOpenCodeFromActiveCodex`
 - `ActivateProfile`
 - `LogoutProfile`
+- `AutoSwitchLimitedCodex`
+- `SyncOpenCodeFromActiveCodex`
 
-### Change add-account flow
+When changing install behavior:
 
-Start here:
+- start with `install.sh`
+- also inspect `docs/systemd/codex-lover.service`
 
-- [app.go](D:\working\codex-lover\desktop-app\app.go)
-- [app.go](D:\working\codex-lover\internal\app\app.go)
+## Verification Workflow
 
-### Change install behavior
+Recommended loop:
 
-Start here:
+```bash
+go test ./...
+go build ./cmd/codex-lover
+install -m 0755 ./codex-lover ~/.local/bin/codex-lover
+codex-lover server run
+```
 
-- [install.ps1](D:\working\codex-lover\install.ps1)
+Useful validation commands:
+
+```bash
+codex-lover server status
+codex-lover status
+codex-lover account list
+codex-lover watch
+```
+
+If the change touches OpenCode sync, validate at least these facts without exposing raw tokens:
+
+- OpenCode auth file exists or is created
+- `openai.type` is `oauth`
+- `openai.accountId` matches the active Codex account id
 
 ## Troubleshooting
 
-### Installer fails because desktop exe is in use
+### `watch` or `status` does not reflect the newest build
 
-Close the app first or run:
+Likely cause:
 
-```powershell
-taskkill /IM codex-lover-desktop.exe /F
-.\install.cmd
+- an old installed binary is still being used
+
+Check:
+
+```bash
+which codex-lover
+stat ~/.local/bin/codex-lover
 ```
 
-### `Add account` opens a console and browser flow looks stuck
-
-That console is expected.
-
-It hosts the interactive `codex login` flow. If the browser is closed early, the console may still be waiting. Closing the browser alone does not automatically cancel the login process.
-
-### The desktop app opens but notifications do not fire
-
-The desktop app must stay open for the live control loop to run. Notifications are not driven by `status`; they are driven by the desktop runtime loop.
+Then reinstall and restart the command.
 
 ### Auto-switch does not happen
 
@@ -394,17 +428,35 @@ Check these conditions:
 
 - the active account actually reached effective limit
 - another account has cached auth
-- another account has usable quota
+- another account still has usable quota
+- the daemon is actually running
 
-### UI changes do not appear
+### Manual switch fails
 
-Rebuild and reinstall:
+Most likely cause:
 
-```powershell
-.\install.cmd
+- the target account has no cached credentials
+
+Check `switchable: yes` in `codex-lover account list`.
+
+### OpenCode does not change
+
+Check these conditions:
+
+- there is an active Codex account
+- daemon refresh has run
+- `~/.local/share/opencode/auth.json` is writable
+- `openai.accountId` matches the active Codex account id
+
+### `server start` or `server status` behaves oddly
+
+Check that `pgrep` is installed:
+
+```bash
+pgrep --version
 ```
 
-If the desktop app is open, close it first.
+On Ubuntu that usually comes from `procps`.
 
 ## Security Rules
 
@@ -413,38 +465,40 @@ Never:
 - print raw access tokens
 - print raw refresh tokens
 - commit auth files
-- paste full auth payloads into chat or PR descriptions
+- paste full auth payloads into chat or docs
 
 Prefer:
 
-- structural summaries
-- redacted values
-- account id/email only when necessary
+- account ids
+- emails if needed
+- expiry timestamps
+- redacted or structural summaries
 
 ## Push Checklist
 
 Before pushing:
 
-```powershell
+```bash
 git status --short
 ```
 
 Confirm:
 
 - no auth files are tracked
-- generated binaries are ignored
-- desktop build artefacts are ignored
-- only intended source/docs changes remain
+- generated binaries are not accidentally staged
+- docs match the Ubuntu branch, not a Windows desktop flow
+- only intended source and doc changes remain
 
 ## Short Version For Another Agent
 
 If another agent only needs the shortest possible handoff, this is enough:
 
-1. Install Go, Node.js, and Wails.
-2. Ensure Codex already created `%USERPROFILE%\.codex\auth.json`.
-3. Run [install.ps1](D:\working\codex-lover\install.ps1).
-4. Launch `codex-lover`.
-5. Use the desktop app as the main UI.
-6. Use `Add account` to add more accounts.
-7. Use `Log in` and `Delete` on cards to manage accounts.
-8. Keep the app open if you want notifications, auto-switch, and OpenCode sync to run.
+1. This branch is Ubuntu headless, not Windows desktop.
+2. Install Go and Codex, and make sure `~/.codex/auth.json` already exists.
+3. Run `bash ./install.sh`.
+4. Ensure `~/.local/bin` is on `PATH`.
+5. Keep the daemon running with `codex-lover server start` or systemd user service.
+6. Use `codex-lover watch` for the live dashboard.
+7. Use `codex-lover account add`, `account switch`, and `account remove` for account management.
+8. Treat OpenCode as a follower of the active Codex account.
+9. Never promise switching for accounts that do not have cached auth.

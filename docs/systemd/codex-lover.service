@@ -1,0 +1,15 @@
+[Unit]
+Description=codex-lover Ubuntu headless daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/codex-lover server run
+WorkingDirectory=%h
+Environment=HOME=%h
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

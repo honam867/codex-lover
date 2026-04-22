@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"codex-lover/internal/model"
@@ -18,6 +19,7 @@ type Store struct {
 	root       string
 	configPath string
 	statePath  string
+	lockPath   string
 	mu         sync.Mutex
 }
 
@@ -31,6 +33,7 @@ func New() (*Store, error) {
 		root:       root,
 		configPath: filepath.Join(root, "config.json"),
 		statePath:  filepath.Join(root, "state.json"),
+		lockPath:   filepath.Join(root, ".lock"),
 	}, nil
 }
 
@@ -45,7 +48,7 @@ func (s *Store) Root() string {
 func DefaultConfig() model.Config {
 	return model.Config{
 		Version:             1,
-		PollIntervalSeconds: 30,
+		PollIntervalSeconds: 15,
 		Daemon: model.DaemonConfig{
 			ListenAddress: "127.0.0.1:47070",
 		},
@@ -65,24 +68,44 @@ func DefaultState() model.State {
 func (s *Store) LoadConfig() (model.Config, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	release, err := s.lockStore()
+	if err != nil {
+		return model.Config{}, err
+	}
+	defer release()
 	return s.loadConfigUnlocked()
 }
 
 func (s *Store) SaveConfig(cfg model.Config) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	release, err := s.lockStore()
+	if err != nil {
+		return err
+	}
+	defer release()
 	return s.saveJSONUnlocked(s.configPath, cfg)
 }
 
 func (s *Store) LoadState() (model.State, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	release, err := s.lockStore()
+	if err != nil {
+		return model.State{}, err
+	}
+	defer release()
 	return s.loadStateUnlocked()
 }
 
 func (s *Store) SaveState(state model.State) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	release, err := s.lockStore()
+	if err != nil {
+		return err
+	}
+	defer release()
 	state.UpdatedAt = time.Now().UTC()
 	return s.saveJSONUnlocked(s.statePath, state)
 }
@@ -90,6 +113,11 @@ func (s *Store) SaveState(state model.State) error {
 func (s *Store) UpsertProfile(profile model.Profile) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	release, err := s.lockStore()
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	cfg, err := s.loadConfigUnlocked()
 	if err != nil {
@@ -112,6 +140,11 @@ func (s *Store) UpsertProfile(profile model.Profile) error {
 func (s *Store) UpdateProfileState(profileID string, state model.ProfileState) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	release, err := s.lockStore()
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	current, err := s.loadStateUnlocked()
 	if err != nil {
@@ -128,6 +161,11 @@ func (s *Store) UpdateProfileState(profileID string, state model.ProfileState) e
 func (s *Store) RemoveProfile(profileID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	release, err := s.lockStore()
+	if err != nil {
+		return err
+	}
+	defer release()
 
 	cfg, err := s.loadConfigUnlocked()
 	if err != nil {
@@ -165,6 +203,11 @@ func (s *Store) RemoveProfile(profileID string) error {
 func (s *Store) ProfileStatuses() ([]model.ProfileStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	release, err := s.lockStore()
+	if err != nil {
+		return nil, err
+	}
+	defer release()
 
 	cfg, err := s.loadConfigUnlocked()
 	if err != nil {
@@ -251,7 +294,52 @@ func (s *Store) saveJSONUnlocked(path string, value any) error {
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", path, err)
 	}
-	return os.WriteFile(path, data, 0o644)
+
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("create temp %s: %w", path, err)
+	}
+	tmpPath := tmp.Name()
+	cleanup := func() {
+		_ = os.Remove(tmpPath)
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("write temp %s: %w", path, err)
+	}
+	if err := tmp.Chmod(0o644); err != nil {
+		_ = tmp.Close()
+		cleanup()
+		return fmt.Errorf("chmod temp %s: %w", path, err)
+	}
+	if err := tmp.Close(); err != nil {
+		cleanup()
+		return fmt.Errorf("close temp %s: %w", path, err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		cleanup()
+		return fmt.Errorf("replace %s: %w", path, err)
+	}
+	return nil
+}
+
+func (s *Store) lockStore() (func(), error) {
+	if err := s.Ensure(); err != nil {
+		return nil, err
+	}
+	file, err := os.OpenFile(s.lockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open store lock: %w", err)
+	}
+	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("lock store: %w", err)
+	}
+	return func() {
+		_ = syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
+		_ = file.Close()
+	}, nil
 }
 
 func authStatusRank(value string) int {
