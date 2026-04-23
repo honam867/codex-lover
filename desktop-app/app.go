@@ -48,6 +48,13 @@ type ActionResponse struct {
 	Snapshot Snapshot `json:"snapshot"`
 }
 
+type SystemStatus struct {
+	HasCodexCLI     bool   `json:"hasCodexCli"`
+	CodexInstallURL string `json:"codexInstallUrl"`
+}
+
+const codexInstallURL = "https://github.com/openai/codex"
+
 type trayController interface {
 	Update(Snapshot)
 	Close()
@@ -246,6 +253,21 @@ func (a *App) AddAccount(provider string) ActionResponse {
 		Message:  message,
 		Snapshot: a.mustSnapshotFallback(),
 	}
+}
+
+func (a *App) GetSystemStatus() SystemStatus {
+	return SystemStatus{
+		HasCodexCLI:     hasCommand("codex.cmd", "codex"),
+		CodexInstallURL: codexInstallURL,
+	}
+}
+
+func (a *App) OpenCodexInstallPage() error {
+	if a.ctx == nil {
+		return fmt.Errorf("app context is not ready")
+	}
+	wailsruntime.BrowserOpenURL(a.ctx, codexInstallURL)
+	return nil
 }
 
 func (a *App) HideToTray() {
@@ -470,6 +492,15 @@ func providerDisplayName(provider string) string {
 	default:
 		return strings.TrimSpace(provider)
 	}
+}
+
+func hasCommand(candidates ...string) bool {
+	for _, candidate := range candidates {
+		if _, err := exec.LookPath(candidate); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 func formatTimePointer(value *time.Time) string {

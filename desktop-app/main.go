@@ -24,7 +24,7 @@ func main() {
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},
-		BackgroundColour: &options.RGBA{R: 242, G: 246, B: 250, A: 1},
+		BackgroundColour: &options.RGBA{R: 10, G: 10, B: 15, A: 1},
 		OnStartup:        app.startup,
 		OnShutdown:       app.shutdown,
 		Bind: []any{
@@ -37,6 +37,9 @@ func main() {
 		Windows: &windowsopts.Options{
 			WebviewUserDataPath: "",
 			DisablePinchZoom:    true,
+			WindowIsTranslucent:  true,
+			BackdropType:        windowsopts.Acrylic,
+			Theme:               windowsopts.Dark,
 		},
 	})
 

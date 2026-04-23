@@ -3,18 +3,30 @@ import codexLogo from "./assets/provider-codex.svg";
 import claudeLogo from "./assets/provider-claude.svg";
 import kimiLogo from "./assets/provider-kimi.svg";
 import {
+  Activity,
+  Plus,
+  RefreshCw,
+  Settings,
+  Trash2,
+  LayoutDashboard,
+  ShieldCheck,
+  Cpu,
+  X
+} from "lucide-react";
+import {
   ActivateProfile,
   AddAccount,
   GetConfig,
   GetInitialSnapshot,
   GetSnapshot,
-  HideToTray,
+  GetSystemStatus,
   LogoutProfile,
+  OpenCodexInstallPage,
   RefreshSnapshot,
   SetAutoRotateCodex,
   SetAutoRotateThreshold,
 } from "../wailsjs/go/main/App";
-import { WindowIsMinimised } from "../wailsjs/runtime/runtime";
+import clsx from "clsx";
 
 type ProfileCard = {
   id: string;
@@ -45,134 +57,85 @@ type ActionResponse = {
   snapshot: Snapshot;
 };
 
-const badgeTone = (kind: string) => {
-  switch (kind.toLowerCase()) {
-    case "active":
-    case "fresh":
-      return "green";
-    case "logged_out":
-    case "cached":
-      return "amber";
-    case "error":
-      return "red";
-    default:
-      return "slate";
-  }
-};
-
-const meterTone = (percent: number) => {
-  if (percent <= 20) {
-    return "danger";
-  }
-  if (percent <= 40) {
-    return "warning";
-  }
-  return "healthy";
+type SystemStatus = {
+  hasCodexCli: boolean;
+  codexInstallUrl: string;
 };
 
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>({ generatedAt: "", profiles: [] });
   const [busyProfile, setBusyProfile] = useState<string>("");
-  const [statusText, setStatusText] = useState<string>("Loading...");
+  const [statusText, setStatusText] = useState<string>("SYSTEM_READY");
   const [providerFilter, setProviderFilter] = useState<string>("all");
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [autoRotateEnabled, setAutoRotateEnabled] = useState<boolean>(false);
   const [autoRotateThreshold, setAutoRotateThreshold] = useState<number>(5);
-
-  const profileCount = snapshot.profiles.length;
+  const [systemStatus, setSystemStatus] = useState<SystemStatus>({ hasCodexCli: true, codexInstallUrl: "https://github.com/openai/codex" });
 
   useEffect(() => {
     void loadInitial();
     void loadConfig();
+    void loadSystemStatus();
+  }, []);
+
+  useEffect(() => {
+    if (!systemStatus.hasCodexCli) return;
     const timer = window.setInterval(() => {
       void loadCurrent();
     }, 15000);
     return () => window.clearInterval(timer);
-  }, []);
+  }, [systemStatus.hasCodexCli]);
+
+  async function loadSystemStatus() {
+    try {
+      const next = await GetSystemStatus();
+      setSystemStatus(next);
+      setStatusText(next.hasCodexCli ? "SYSTEM_READY" : "CODEX_REQUIRED");
+    } catch {
+      setSystemStatus((current) => ({ ...current, hasCodexCli: false }));
+      setStatusText("SYSTEM_CHECK_FAILED");
+    }
+  }
+
+  async function openCodexInstallPage() {
+    try {
+      await OpenCodexInstallPage();
+    } catch {
+      setStatusText("OPEN_INSTALL_LINK_FAILED");
+    }
+  }
 
   async function loadConfig() {
     try {
       const config = await GetConfig();
-      // Wails bindings use snake_case for Go struct fields
       const enabled = (config as any).auto_rotate_codex;
       const threshold = (config as any).auto_rotate_threshold;
-      if (typeof enabled === "boolean") {
-        setAutoRotateEnabled(enabled);
-      }
-      if (typeof threshold === "number") {
-        setAutoRotateThreshold(threshold);
-      }
-    } catch {
-      // ignore config loading errors
-    }
+      if (typeof enabled === "boolean") setAutoRotateEnabled(enabled);
+      if (typeof threshold === "number") setAutoRotateThreshold(threshold);
+    } catch {}
   }
-
-  async function toggleAutoRotate(value: boolean) {
-    setAutoRotateEnabled(value);
-    try {
-      await SetAutoRotateCodex(value);
-    } catch {
-      // ignore
-    }
-  }
-
-  async function updateThreshold(value: number) {
-    setAutoRotateThreshold(value);
-    try {
-      await SetAutoRotateThreshold(value);
-    } catch {
-      // ignore
-    }
-  }
-
-  useEffect(() => {
-    let cancelled = false;
-    let inFlight = false;
-
-    const timer = window.setInterval(async () => {
-      if (cancelled || inFlight) {
-        return;
-      }
-      inFlight = true;
-      try {
-        const minimised = await WindowIsMinimised();
-        if (minimised) {
-          await HideToTray();
-        }
-      } catch {
-        // ignore minimise polling errors
-      } finally {
-        inFlight = false;
-      }
-    }, 250);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, []);
 
   async function loadInitial() {
     const initial = await GetInitialSnapshot();
     setSnapshot(initial);
-    setStatusText(`Last refresh: ${initial.generatedAt}   Accounts: ${initial.profiles.length}   Auto refresh: every 15s`);
   }
 
   async function loadCurrent() {
+    if (!systemStatus.hasCodexCli) return;
     const current = await GetSnapshot();
     setSnapshot(current);
-    setStatusText(`Last refresh: ${current.generatedAt}   Accounts: ${current.profiles.length}   Auto refresh: every 15s`);
   }
 
   async function refresh() {
+    setStatusText("SYNCHRONIZING...");
     const result = await RefreshSnapshot();
     applyAction(result);
   }
 
   function applyAction(result: ActionResponse) {
     setSnapshot(result.snapshot);
-    setStatusText(result.error ? `${result.message}: ${result.error}` : result.message || `Last refresh: ${result.snapshot.generatedAt}`);
+    setStatusText(result.error ? `ERROR: ${result.error}` : `CORE_LOADED: ${result.snapshot.generatedAt}`);
     setBusyProfile("");
     setShowAddModal(false);
   }
@@ -184,8 +147,7 @@ function App() {
   }
 
   async function onDelete(profileId: string, label: string) {
-    const confirmed = window.confirm(`Delete account ${label}? This removes cached auth and local account data.`);
-    if (!confirmed) return;
+    if (!window.confirm(`CONFIRM WIPE FOR ${label.toUpperCase()}?`)) return;
     setBusyProfile(profileId);
     const result = await LogoutProfile(profileId);
     applyAction(result);
@@ -197,9 +159,13 @@ function App() {
   }
 
   const providerOptions = useMemo(() => {
-    const values = Array.from(new Set(snapshot.profiles.map((profile) => profile.provider || "unknown")));
-    return values.sort((left, right) => left.localeCompare(right));
+    return Array.from(new Set(snapshot.profiles.map((p) => p.provider || "unknown"))).sort();
   }, [snapshot.profiles]);
+
+  const sortedProfiles = useMemo(() => {
+    if (providerFilter === "all") return snapshot.profiles;
+    return snapshot.profiles.filter((p) => (p.provider || "unknown") === providerFilter);
+  }, [providerFilter, snapshot.profiles]);
 
   useEffect(() => {
     if (providerFilter !== "all" && !providerOptions.includes(providerFilter)) {
@@ -207,238 +173,287 @@ function App() {
     }
   }, [providerFilter, providerOptions]);
 
-  const sortedProfiles = useMemo(() => {
-    if (providerFilter === "all") {
-      return snapshot.profiles;
-    }
-    return snapshot.profiles.filter((profile) => (profile.provider || "unknown") === providerFilter);
-  }, [providerFilter, snapshot.profiles]);
-
   return (
     <div className="app-shell">
-      <div className="bg-orb orb-a" />
-      <div className="bg-orb orb-b" />
-      <header className="topbar">
-        <div>
-          <h1>Account Management</h1>
-          <p>{statusText || `Accounts: ${profileCount}`}</p>
+      <aside className="sidebar">
+        <div className="sidebar-logo">
+          <Cpu size={24} className="text-neon" />
+          <h1>CODEX // CORE</h1>
         </div>
-        <div className="topbar-actions">
-          <label className="provider-filter" title="Filter by provider">
-            <select
-              aria-label="Filter by provider"
-              value={providerFilter}
-              onChange={(event) => setProviderFilter(event.target.value)}
-            >
-              <option value="all">All providers</option>
-              {providerOptions.map((provider) => (
-                <option key={provider} value={provider}>
-                  {providerLabel(provider)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <button className="ghost-btn" onClick={() => void refresh()}>
-            Refresh now
-          </button>
-          <button className="settings-btn" title="Settings" onClick={() => setShowSettingsModal(true)} aria-label="Open settings">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="12" cy="12" r="3" />
-              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
-            </svg>
-          </button>
-          <button className="solid-btn" onClick={() => setShowAddModal(true)}>
-            Add account
-          </button>
-        </div>
-      </header>
 
-      <main className="dashboard-grid">
-        {sortedProfiles.map((profile) => (
-          <article
-            key={profile.id}
-            className={`account-card ${profile.isActive ? `active-card active-card-${(profile.provider || "unknown").toLowerCase()}` : ""}`}
+        <nav className="nav-group">
+          <span className="nav-label">Modules</span>
+          <button 
+            onClick={() => setProviderFilter('all')}
+            className={clsx("cyber-btn w-full flex items-center gap-2 mb-2", providerFilter === 'all' && 'cyber-btn-solid')}
           >
-            <div className="card-header">
-              <div className="card-title-row">
-                <h2 title={profile.label}>{profile.label}</h2>
-              </div>
-              <div className="badge-row">
-                <span className="mini-badge plan-badge">{profile.plan}</span>
-                <span className={`mini-badge ${badgeTone(profile.authStatus)}`}>{profile.authStatus}</span>
-                <span className={`mini-badge ${badgeTone(profile.freshness)}`}>{profile.freshness}</span>
-              </div>
-            </div>
+            <LayoutDashboard size={14} /> Main Dashboard
+          </button>
+        </nav>
 
-            <p className="email-line" title={profile.email}>{profile.email}</p>
-
-            <div className="meter-block">
-              <div className="meter-row">
-                <div className="meter-label">5H</div>
-                <div className="meter-summary" title={profile.primarySummary}>{profile.primarySummary}</div>
-              </div>
-              <div className="meter-track">
-                <div
-                  className={`meter-fill meter-${meterTone(profile.primaryPercent)}`}
-                  style={{ width: `${profile.primaryPercent}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="meter-block">
-              <div className="meter-row">
-                <div className="meter-label">WEEKLY</div>
-                <div className="meter-summary" title={profile.secondarySummary}>{profile.secondarySummary}</div>
-              </div>
-              <div className="meter-track">
-                <div
-                  className={`meter-fill meter-${meterTone(profile.secondaryPercent)}`}
-                  style={{ width: `${profile.secondaryPercent}%` }}
-                />
-              </div>
-            </div>
-
-            <div className="card-actions">
-              {profile.canLoginFromCache ? (
-                <button
-                  className="ghost-btn small-btn"
-                  disabled={busyProfile === profile.id}
-                  onClick={() => void onActivate(profile.id)}
-                >
-                  Log in
-                </button>
-              ) : (
-                <span className="placeholder-action" />
-              )}
+        <nav className="nav-group">
+          <span className="nav-label">Source Filter</span>
+          <div className="space-y-2">
+            {['all', ...providerOptions].map(p => (
               <button
-                className="danger-btn small-btn"
-                disabled={busyProfile === profile.id}
-                onClick={() => void onDelete(profile.id, profile.label)}
+                key={p}
+                onClick={() => setProviderFilter(p)}
+                className={clsx(
+                  "cyber-btn w-full flex items-center justify-between text-[10px]",
+                  providerFilter === p && "cyber-btn-solid"
+                )}
               >
-                Delete
+                <span>{p.toUpperCase()}</span>
+                {p !== 'all' && <img src={getProviderLogo(p)} className="w-3 h-3 grayscale brightness-200" />}
               </button>
-            </div>
+            ))}
+          </div>
+        </nav>
 
-            <footer className="card-footer">
-              <span>{profile.lastRefreshedAtText}</span>
-              <div className="provider-mark provider-mark-footer" title={providerLabel(profile.provider)}>
-                <img src={providerLogo(profile.provider)} alt={providerLabel(profile.provider)} />
-                <span>{providerLabel(profile.provider)}</span>
+        <div className="mt-auto">
+          <button onClick={() => setShowSettingsModal(true)} className="cyber-btn w-full flex items-center gap-2">
+            <Settings size={14} /> Core Settings
+          </button>
+        </div>
+      </aside>
+
+      <main className="main-content">
+        <header className="top-nav">
+          <div className="status-bar">
+            <div className="status-dot" />
+            <span>{statusText}</span>
+          </div>
+
+          <div className="flex gap-4">
+            <button onClick={() => void refresh()} className="cyber-btn flex items-center gap-2">
+              <RefreshCw size={14} /> Sync All
+            </button>
+            <button onClick={() => setShowAddModal(true)} className="cyber-btn cyber-btn-solid flex items-center gap-2">
+              <Plus size={14} /> New Link
+            </button>
+          </div>
+        </header>
+
+        <div className="dashboard-grid">
+          {sortedProfiles.map((profile) => (
+            <article 
+              key={profile.id} 
+              className={clsx(
+                "account-card", 
+                profile.isActive && `active active-${profile.provider.toLowerCase()}`
+              )}
+            >
+              <div className="flex justify-between items-start mb-4">
+                <div className="min-w-0 flex-1">
+                  <h3 className="card-title truncate" title={profile.label}>{profile.label.toUpperCase()}</h3>
+                  <p className="card-email truncate" title={profile.email}>{profile.email}</p>
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <div className="provider-badge">
+                    <img src={getProviderLogo(profile.provider)} className="provider-icon-mini" />
+                    <span className="text-[9px]">{profile.provider.toUpperCase()}</span>
+                  </div>
+                </div>
               </div>
-            </footer>
-          </article>
-        ))}
+
+              <div className="space-y-5">
+                <div className="meter-block">
+                  <div className="meter-label">
+                    <span>Quota: 5H</span>
+                    <span className="text-neon">{profile.primarySummary}</span>
+                  </div>
+                  <div className="meter-track">
+                    <div 
+                      className={clsx("meter-fill", meterTone(profile.primaryPercent))}
+                      style={{ width: `${profile.primaryPercent}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div className="meter-block">
+                  <div className="meter-label">
+                    <span>Quota: WEEKLY</span>
+                    <span className="text-neon">{profile.secondarySummary}</span>
+                  </div>
+                  <div className="meter-track">
+                    <div 
+                      className={clsx("meter-fill", meterTone(profile.secondaryPercent))}
+                      style={{ width: `${profile.secondaryPercent}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center mt-6 pt-4 border-t border-dashed border-[rgba(0,243,255,0.1)]">
+                <span className={clsx("text-[9px] px-2 py-0.5 rounded", badgeClass(profile.authStatus))}>
+                  {profile.authStatus.replace('_', ' ')}
+                </span>
+                <div className="flex gap-2">
+                  {profile.canLoginFromCache && (
+                    <button 
+                      onClick={() => void onActivate(profile.id)}
+                      className="cyber-btn p-1.5"
+                      disabled={busyProfile === profile.id}
+                      title="RE-AUTHENTICATE"
+                    >
+                      <ShieldCheck size={14} />
+                    </button>
+                  )}
+                  <button 
+                    onClick={() => void onDelete(profile.id, profile.label)}
+                    className="cyber-btn cyber-btn-danger p-1.5"
+                    disabled={busyProfile === profile.id}
+                    title="TERMINATE"
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
+              </div>
+            </article>
+          ))}
+        </div>
       </main>
 
-      {showAddModal ? (
-        <div className="modal-backdrop" onClick={() => setShowAddModal(false)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <h3>Add account</h3>
-                <p>Choose the provider to start a login flow in a separate console window.</p>
-              </div>
-              <button className="modal-close" onClick={() => setShowAddModal(false)} aria-label="Close add account dialog">
-                ×
-              </button>
+      {showAddModal && (
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-neon text-lg font-bold">ESTABLISH_UPLINK</h2>
+              <button onClick={() => setShowAddModal(false)}><X size={20} /></button>
             </div>
-            <div className="provider-choice-grid">
-              <button className="provider-choice provider-choice-codex" onClick={() => void onAdd("codex")}>
-                <img src={codexLogo} alt="Codex" />
-                <strong>Codex</strong>
-                <span>Open a Codex login console</span>
-              </button>
-              <button className="provider-choice provider-choice-claude" onClick={() => void onAdd("claude")}>
-                <img src={claudeLogo} alt="Claude" />
-                <strong>Claude</strong>
-                <span>Open a Claude login console</span>
-              </button>
-              <button className="provider-choice provider-choice-kimi" onClick={() => void onAdd("kimi")}>
-                <img src={kimiLogo} alt="Kimi" />
-                <strong>Kimi</strong>
-                <span>Open a Kimi login console</span>
-              </button>
+            <div className="grid grid-cols-1 gap-4">
+              {['codex', 'claude', 'kimi'].map(p => (
+                <button 
+                  key={p} 
+                  onClick={() => void onAdd(p)}
+                  className="cyber-btn flex items-center justify-between group py-4"
+                >
+                  <div className="flex items-center gap-3">
+                    <img src={getProviderLogo(p)} className="w-6 h-6" />
+                    <span className="font-bold">{p.toUpperCase()}</span>
+                  </div>
+                  <span className="text-[10px] opacity-50 group-hover:opacity-100">EXEC_LOGIN.SH _</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>
-      ) : null}
+      )}
 
-      {showSettingsModal ? (
-        <div className="modal-backdrop" onClick={() => setShowSettingsModal(false)}>
-          <div className="modal-card" onClick={(event) => event.stopPropagation()}>
-            <div className="modal-header">
-              <div>
-                <h3>Settings</h3>
-                <p>Configure auto-rotate and switching behavior.</p>
-              </div>
-              <button className="modal-close" onClick={() => setShowSettingsModal(false)} aria-label="Close settings dialog">
-                ×
-              </button>
+      {showSettingsModal && (
+        <div className="modal-overlay" onClick={() => setShowSettingsModal(false)}>
+          <div className="modal-content" onClick={e => e.stopPropagation()}>
+             <div className="flex justify-between items-center mb-6">
+              <h2 className="text-neon text-lg font-bold">CORE_CONFIGURATION</h2>
+              <button onClick={() => setShowSettingsModal(false)}><X size={20} /></button>
             </div>
-            <div className="settings-body">
-              <div className="settings-row">
-                <div className="settings-label">
-                  <strong>Auto-rotate Codex accounts (5H-First)</strong>
-                  <span>Automatically switch to another cached account when the active one drops below the threshold.</span>
+            <div className="space-y-8">
+              <div className="flex justify-between items-center bg-[rgba(0,243,255,0.05)] p-4 border border-[rgba(0,243,255,0.1)]">
+                <div>
+                  <div className="font-bold text-sm">AUTO_ROTATION_PROTOCOL</div>
+                  <div className="text-[10px] text-dim">Automatic account switching on exhaustion</div>
                 </div>
-                <label className="toggle-switch">
-                  <input
-                    type="checkbox"
-                    checked={autoRotateEnabled}
-                    onChange={(e) => void toggleAutoRotate(e.target.checked)}
+                <label className="relative inline-flex items-center cursor-pointer">
+                  <input 
+                    type="checkbox" 
+                    className="sr-only peer"
+                    checked={autoRotateEnabled} 
+                    onChange={async e => {
+                      const next = e.target.checked;
+                      setAutoRotateEnabled(next);
+                      try {
+                        await SetAutoRotateCodex(next);
+                      } catch {
+                        setAutoRotateEnabled(!next);
+                        setStatusText("ERROR: SAVE FAILED");
+                      }
+                    }}
                   />
-                  <span className="toggle-slider" />
+                  <div className="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-cyan"></div>
                 </label>
               </div>
-              <div className="settings-row">
-                <div className="settings-label">
-                  <strong>Switch threshold (%)</strong>
-                  <span>Percentage of remaining 5H quota that triggers a switch.</span>
+              <div className="bg-[rgba(0,243,255,0.05)] p-4 border border-[rgba(0,243,255,0.1)]">
+                <div className="flex justify-between mb-4">
+                  <span className="font-bold text-sm">SWITCH_THRESHOLD</span>
+                  <span className="text-neon">{autoRotateThreshold}%</span>
                 </div>
-                <div className="slider-control">
-                  <input
-                    type="range"
-                    min={1}
-                    max={20}
-                    value={autoRotateThreshold}
-                    onChange={(e) => void updateThreshold(Number(e.target.value))}
-                  />
-                  <span className="slider-value">{autoRotateThreshold}%</span>
+                <input 
+                  type="range" 
+                  min={1} max={20} 
+                  className="w-full h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer accent-neon-cyan"
+                  value={autoRotateThreshold}
+                  onChange={async e => {
+                    const next = Number(e.target.value);
+                    setAutoRotateThreshold(next);
+                    try {
+                      await SetAutoRotateThreshold(next);
+                    } catch {
+                      void loadConfig();
+                      setStatusText("ERROR: SAVE FAILED");
+                    }
+                  }}
+                />
+                <div className="flex justify-between text-[8px] text-dim mt-2">
+                  <span>1%</span>
+                  <span>10%</span>
+                  <span>20%</span>
                 </div>
               </div>
             </div>
           </div>
         </div>
-      ) : null}
+      )}
+
+      {!systemStatus.hasCodexCli && (
+        <div className="modal-overlay modal-overlay-blocking">
+          <div className="modal-content prerequisite-modal">
+            <div className="prerequisite-label">SYSTEM REQUIREMENT</div>
+            <h2 className="prerequisite-title">INSTALL CODEX FIRST</h2>
+            <p className="prerequisite-copy">
+              Codex CLI is not installed on this machine yet. This app currently depends on Codex for login and the main runtime flow.
+            </p>
+            <p className="prerequisite-copy prerequisite-copy-dim">
+              Install Codex, then return here and click re-check.
+            </p>
+            <div className="prerequisite-actions">
+              <button onClick={() => void openCodexInstallPage()} className="cyber-btn cyber-btn-solid">
+                Download Codex
+              </button>
+              <button onClick={() => void loadSystemStatus()} className="cyber-btn">
+                Re-check
+              </button>
+            </div>
+            {systemStatus.codexInstallUrl && (
+              <div className="prerequisite-link">{systemStatus.codexInstallUrl}</div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
-function providerLabel(provider: string) {
-  const normalized = (provider || "").trim().toLowerCase();
-  switch (normalized) {
-    case "codex":
-      return "Codex";
-    case "claude":
-      return "Claude";
-    case "kimi":
-      return "Kimi";
-    default:
-      return normalized ? normalized.charAt(0).toUpperCase() + normalized.slice(1) : "Unknown";
+const getProviderLogo = (p: string) => {
+  switch (p.toLowerCase()) {
+    case 'codex': return codexLogo;
+    case 'claude': return claudeLogo;
+    case 'kimi': return kimiLogo;
+    default: return codexLogo;
   }
-}
+};
 
-function providerLogo(provider: string) {
-  const normalized = (provider || "").trim().toLowerCase();
-  switch (normalized) {
-    case "claude":
-      return claudeLogo;
-    case "kimi":
-      return kimiLogo;
-    case "codex":
-    default:
-      return codexLogo;
+const badgeClass = (status: string) => {
+  switch (status.toLowerCase()) {
+    case 'active': return 'bg-[rgba(0,255,159,0.1)] text-neon-green border border-[rgba(0,255,159,0.2)]';
+    case 'error': return 'bg-[rgba(255,0,85,0.1)] text-neon-pink border border-[rgba(255,0,85,0.2)]';
+    default: return 'bg-[rgba(128,128,144,0.1)] text-text-dim border border-[rgba(128,128,144,0.2)]';
   }
-}
+};
+
+const meterTone = (percent: number) => {
+  if (percent <= 20) return "danger";
+  if (percent <= 40) return "warning";
+  return "healthy";
+};
 
 export default App;
