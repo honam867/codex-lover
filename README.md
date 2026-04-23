@@ -1,8 +1,8 @@
-# codex-lover
+# Codex Lover
 
-![codex-lover cover](./docs/cover.png)
+![Codex Lover cover](./docs/cover.png)
 
-`codex-lover` is a Windows-first desktop control panel for people who juggle multiple AI coding accounts and do not want to babysit quota windows, auth files, and account switching by hand.
+`Codex Lover` is a Windows-first desktop control panel for people who juggle multiple AI coding accounts and do not want to babysit quota windows, auth files, and account switching by hand.
 
 It keeps your active and logged-out accounts visible in one desktop app, tracks quota usage, preserves cached account state, and can rotate to another cached Codex account when the active one is exhausted.
 
@@ -16,7 +16,7 @@ It keeps your active and logged-out accounts visible in one desktop app, tracks 
 
 ## Who This Is For
 
-`codex-lover` is for you if you:
+`Codex Lover` is for you if you:
 
 - rotate across multiple Codex accounts regularly
 - want a desktop UI instead of managing auth files by hand
@@ -34,7 +34,7 @@ Heavy multi-account Codex usage usually turns into a repetitive loop:
 - try to remember which account resets next
 - hope OpenCode is still on the same account
 
-`codex-lover` turns that into one local desktop workflow.
+`Codex Lover` turns that into one local desktop workflow.
 
 ## What You Get
 
