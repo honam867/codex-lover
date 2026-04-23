@@ -865,11 +865,11 @@ func fiveHourRemaining(status model.ProfileStatus) float64 {
 	if status.State.Usage == nil {
 		return 0
 	}
-	if status.State.Usage.Secondary != nil {
-		return status.State.Usage.Secondary.RemainingPercent
-	}
 	if status.State.Usage.Primary != nil {
 		return status.State.Usage.Primary.RemainingPercent
+	}
+	if status.State.Usage.Secondary != nil {
+		return status.State.Usage.Secondary.RemainingPercent
 	}
 	return 0
 }
@@ -878,11 +878,11 @@ func weeklyRemaining(status model.ProfileStatus) float64 {
 	if status.State.Usage == nil {
 		return 0
 	}
-	if status.State.Usage.Primary != nil {
-		return status.State.Usage.Primary.RemainingPercent
-	}
 	if status.State.Usage.Secondary != nil {
 		return status.State.Usage.Secondary.RemainingPercent
+	}
+	if status.State.Usage.Primary != nil {
+		return status.State.Usage.Primary.RemainingPercent
 	}
 	return 0
 }
