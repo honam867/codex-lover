@@ -63,22 +63,27 @@ func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.Refr
 		}
 	}
 
-	switchResult, err := a.svc.AutoSwitchLimitedCodex(statuses)
-	if err == nil && switchResult.Changed {
-		if emitNotifications {
-			_ = notify.New().Send(notify.Event{
-				Title:   "Codex account switched",
-				Message: "Da chuyen tu " + profileLabel(switchResult.From) + " sang " + profileLabel(switchResult.To),
-				Level:   notify.LevelInfo,
-			})
+	cfg, _ := a.svc.LoadConfig()
+	autoRotate := cfg.AutoRotateCodex
+
+	if autoRotate {
+		switchResult, err := a.svc.AutoSwitchLimitedCodex(statuses)
+		if err == nil && switchResult.Changed {
+			if emitNotifications {
+				_ = notify.New().Send(notify.Event{
+					Title:   "Codex account switched",
+					Message: "Da chuyen tu " + profileLabel(switchResult.From) + " sang " + profileLabel(switchResult.To),
+					Level:   notify.LevelInfo,
+				})
+			}
+			statuses, err = a.svc.RefreshAllWithOptions(opts)
+			if err == nil {
+				a.usageSchedule.MarkUsageAttempted(opts, time.Now())
+			}
 		}
-		statuses, err = a.svc.RefreshAllWithOptions(opts)
-		if err == nil {
-			a.usageSchedule.MarkUsageAttempted(opts, time.Now())
+		if err != nil {
+			return Snapshot{}, err
 		}
-	}
-	if err != nil {
-		return Snapshot{}, err
 	}
 
 	rotateResult, err := a.svc.AutoRotateCodex(statuses)

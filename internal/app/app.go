@@ -214,6 +214,9 @@ func addCodexAccount(ctx context.Context, svc *service.Service, st *store.Store)
 	if err != nil {
 		return model.Profile{}, fmt.Errorf("login finished but account import failed: %w", err)
 	}
+	if _, err := svc.ActivateProfile(profile.ID); err != nil {
+		return model.Profile{}, fmt.Errorf("account added but auto-activation failed: %w", err)
+	}
 	if _, err := svc.RefreshAll(); err != nil {
 		return model.Profile{}, err
 	}
