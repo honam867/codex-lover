@@ -29,7 +29,7 @@ func Run(ctx context.Context, args []string) error {
 	svc := service.New(st)
 
 	if len(args) == 0 {
-		return runStatusCommand(svc, st, false, false)
+		return runWatch(ctx, svc, st)
 	}
 
 	switch args[0] {
@@ -303,7 +303,7 @@ func addCodexAccount(ctx context.Context, svc *service.Service, st *store.Store)
 
 	fmt.Println("Add Codex account")
 	fmt.Printf("Managed home: %s\n", homePath)
-	fmt.Println("Login mode: device code")
+	fmt.Println("Login mode: browser login")
 
 	if err := launchCodexLogin(ctx, basePath, homePath); err != nil {
 		return model.Profile{}, err
@@ -359,17 +359,21 @@ func launchCodexLogin(ctx context.Context, basePath string, homePath string) err
 		return err
 	}
 
-	fmt.Println("Starting `codex login --device-auth`...")
+	fmt.Println("Starting `codex login`...")
 	tmpDir := filepath.Join(basePath, "tmp")
 	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return fmt.Errorf("create managed Codex temp dir: %w", err)
 	}
 
+	// Browser-link login (ported from the main branch): plain `codex login`
+	// opens a browser/redirect flow instead of the device-code flow. The
+	// `cli_auth_credentials_store=file` override is kept so the credentials are
+	// written to auth.json (Linux codex may otherwise use the OS keyring),
+	// which is what AddManagedCodexAccount reads back.
 	cmd := exec.CommandContext(
 		ctx,
 		cmdPath,
 		"login",
-		"--device-auth",
 		"-c",
 		`cli_auth_credentials_store="file"`,
 	)
@@ -513,6 +517,8 @@ func formatWindowText(window *model.UsageWindow, authStatus string, now time.Tim
 
 func printUsage() {
 	fmt.Println("codex-lover")
+	fmt.Println()
+	fmt.Println("Run with no command to open the live watch dashboard.")
 	fmt.Println()
 	fmt.Println("Ubuntu headless commands:")
 	fmt.Println("  server run")

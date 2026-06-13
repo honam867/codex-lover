@@ -13,6 +13,13 @@ import (
 )
 
 func runWatch(ctx context.Context, svc *service.Service, st *store.Store) error {
+	if isInteractiveTerminal() {
+		return runWatchInteractive(ctx, svc, st)
+	}
+	return runWatchReadOnly(ctx, svc, st)
+}
+
+func runWatchReadOnly(ctx context.Context, svc *service.Service, st *store.Store) error {
 	ticker := time.NewTicker(15 * time.Second)
 	defer ticker.Stop()
 
