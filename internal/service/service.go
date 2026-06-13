@@ -483,6 +483,12 @@ func (s *Service) ActivateProfile(profileID string) (ActivateResult, error) {
 	if selected.State.AuthStatus == model.AuthStatusActive {
 		return ActivateResult{Profile: selected.Profile, Home: selected.Profile.HomePath}, nil
 	}
+	// Block manual switches to an account that is already at its usage limit:
+	// the auto-switch loop uses the same predicate and would immediately bounce
+	// the active account back, so the switch would never stick.
+	if usageLimitReached(selected) {
+		return ActivateResult{}, fmt.Errorf("account %q is at its usage limit%s; not switching", profileLabel(selected.Profile), limitedWindowResetHint(selected))
+	}
 	sourceProfileID, ok := s.cachedAuthSourceProfileID(selected.Profile, statusesToProfiles(statuses))
 	if !ok {
 		return ActivateResult{}, fmt.Errorf("account %q does not have cached credentials", profileLabel(selected.Profile))
@@ -1242,6 +1248,20 @@ func usageLimitReached(status model.ProfileStatus) bool {
 
 func windowLimitReached(window *model.UsageWindow) bool {
 	return window != nil && window.RemainingPercent <= 0.5
+}
+
+// limitedWindowResetHint returns a short " (resets ...)" suffix for the first
+// limit-reached window, or "" when none has a known reset time.
+func limitedWindowResetHint(status model.ProfileStatus) string {
+	if status.State.Usage == nil {
+		return ""
+	}
+	for _, window := range []*model.UsageWindow{status.State.Usage.Primary, status.State.Usage.Secondary} {
+		if windowLimitReached(window) && window.ResetsAt != nil {
+			return " (resets " + window.ResetsAt.Local().Format("2006-01-02 15:04") + ")"
+		}
+	}
+	return ""
 }
 
 func quotaScore(status model.ProfileStatus, now time.Time) (float64, bool) {
