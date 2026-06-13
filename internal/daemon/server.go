@@ -10,14 +10,17 @@ import (
 	"time"
 
 	"codex-lover/internal/model"
+	"codex-lover/internal/notify"
 	"codex-lover/internal/service"
 )
 
 const loggedOutRefreshInterval = 15 * time.Minute
 
 type Server struct {
-	address string
-	svc     *service.Service
+	address  string
+	svc      *service.Service
+	notifier *thresholdNotifier
+	sender   *notify.Sender
 }
 
 type profileActionRequest struct {
@@ -32,8 +35,10 @@ type runtimeRefreshResult struct {
 
 func New(address string, svc *service.Service) *Server {
 	return &Server{
-		address: address,
-		svc:     svc,
+		address:  address,
+		svc:      svc,
+		notifier: newThresholdNotifier(),
+		sender:   notify.New(),
 	}
 }
 
@@ -258,6 +263,22 @@ func (s *Server) logSnapshot(source string, statuses []model.ProfileStatus, sync
 		countCodexProfiles(statuses),
 		syncStatus,
 	)
+	s.emitThresholdNotifications(statuses)
+}
+
+// emitThresholdNotifications fires a desktop notification whenever the active
+// account crosses a usage threshold since the previous snapshot.
+func (s *Server) emitThresholdNotifications(statuses []model.ProfileStatus) {
+	if s.notifier == nil || s.sender == nil {
+		return
+	}
+	for _, event := range s.notifier.collect(statuses, time.Now()) {
+		_ = s.sender.Send(notify.Event{
+			Title:   event.Title,
+			Message: event.Message,
+			Level:   notify.LevelWarning,
+		})
+	}
 }
 
 func (s *Server) logCachedRefresh(statuses []model.ProfileStatus, refreshedCount int) {
@@ -284,6 +305,13 @@ func (s *Server) logAutoSwitch(source string, result service.SwitchResult) {
 		profileLabel(result.To),
 		strings.TrimSpace(result.Reason),
 	)
+	if s.sender != nil {
+		_ = s.sender.Send(notify.Event{
+			Title:   "Codex account switched",
+			Message: fmt.Sprintf("Switched from %s to %s", profileLabel(result.From), profileLabel(result.To)),
+			Level:   notify.LevelInfo,
+		})
+	}
 }
 
 func (s *Server) shouldWarmLoggedOutUsage(statuses []model.ProfileStatus, requested bool) bool {
