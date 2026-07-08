@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"codex-lover/internal/codex"
 	"codex-lover/internal/daemon"
 	"codex-lover/internal/desktop"
 	"codex-lover/internal/model"
@@ -76,6 +77,8 @@ func Run(ctx context.Context, args []string) error {
 		}
 		printStatuses(statuses)
 		return nil
+	case "trigger":
+		return runTriggerProbe(args[1:])
 	case "help", "-h", "--help":
 		printUsage()
 		return nil
@@ -153,6 +156,51 @@ func runProfileCommand(svc *service.Service, args []string) error {
 	default:
 		return fmt.Errorf("unknown profile subcommand %q", args[0])
 	}
+}
+
+func runTriggerProbe(args []string) error {
+	probe := false
+	for _, a := range args {
+		if a == "--probe" {
+			probe = true
+		}
+	}
+	if !probe {
+		return fmt.Errorf("usage: codex-lover trigger --probe")
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	codexHome := filepath.Join(home, ".codex")
+	auth, err := codex.LoadProfileAuth(codexHome)
+	if err != nil {
+		return fmt.Errorf("load active codex auth: %w", err)
+	}
+
+	fmt.Printf("Probing trigger for active account: %s\n", emptyDash(auth.Email))
+	result, refreshed, err := codex.TriggerWindow(auth, codex.DefaultTriggerModels)
+	if err != nil {
+		return fmt.Errorf("trigger failed: %w", err)
+	}
+	if refreshed != nil {
+		fmt.Println("(token was refreshed during trigger)")
+	}
+	fmt.Printf("OK: model=%s status=%d\n", result.ModelUsed, result.Status)
+
+	usage, uerr := codex.FetchUsage(auth)
+	if uerr != nil {
+		fmt.Printf("usage check failed: %v\n", uerr)
+		return nil
+	}
+	if usage.Primary != nil && usage.Primary.ResetsAt != nil {
+		fmt.Printf("primary window resets at: %s (used %.0f%%)\n",
+			usage.Primary.ResetsAt.Local().Format("2006-01-02 15:04"), usage.Primary.UsedPercent)
+	} else {
+		fmt.Println("primary window not present in usage response")
+	}
+	return nil
 }
 
 func parseImportFlags(args []string) (string, string, error) {
@@ -587,6 +635,7 @@ func printUsage() {
 	fmt.Println("  profile list")
 	fmt.Println("  refresh")
 	fmt.Println("  status")
+	fmt.Println("  trigger --probe")
 	fmt.Println("  daemon")
 	fmt.Println("  daemon-status")
 }
