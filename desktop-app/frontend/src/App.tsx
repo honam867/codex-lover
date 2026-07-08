@@ -574,7 +574,7 @@ function App() {
 
                         {topNPreview.length > 0 && (
                           <div className="trigger-preview">
-                            <div className="text-[10px] text-dim mb-1">SẼ TRIGGER:</div>
+                            <div className="text-[10px] text-dim mb-1">WILL TRIGGER:</div>
                             {topNPreview.map((id) => {
                               const p = codexProfiles.find((c) => c.id === id);
                               if (!p) return null;
