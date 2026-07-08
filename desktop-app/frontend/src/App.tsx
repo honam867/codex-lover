@@ -20,11 +20,16 @@ import {
   GetInitialSnapshot,
   GetSnapshot,
   GetSystemStatus,
+  GetTriggerSettings,
+  GetLastTriggerRun,
   LogoutProfile,
   OpenCodexInstallPage,
+  PreviewTriggerSelection,
   RefreshSnapshot,
+  SaveTriggerSettings,
   SetAutoRotateCodex,
   SetAutoRotateThreshold,
+  TriggerNow,
 } from "../wailsjs/go/main/App";
 import clsx from "clsx";
 
@@ -62,6 +67,47 @@ type SystemStatus = {
   codexInstallUrl: string;
 };
 
+type TriggerMode = "all" | "top_n" | "custom";
+
+type TriggerConfig = {
+  enabled: boolean;
+  time_of_day: string;
+  mode: TriggerMode;
+  count: number;
+  profile_ids: string[];
+  grace_minutes: number;
+};
+
+type TriggerAccountResult = {
+  profile_id: string;
+  label: string;
+  status: string;
+  model_used?: string;
+  verified: boolean;
+  error?: string;
+};
+
+type TriggerRun = {
+  ran_at: string;
+  manual: boolean;
+  results: TriggerAccountResult[];
+};
+
+const TIME_SLOTS: string[] = Array.from({ length: 48 }, (_, i) => {
+  const h = String(Math.floor(i / 2)).padStart(2, "0");
+  const m = i % 2 === 0 ? "00" : "30";
+  return `${h}:${m}`;
+});
+
+const DEFAULT_TRIGGER: TriggerConfig = {
+  enabled: false,
+  time_of_day: "08:00",
+  mode: "all",
+  count: 2,
+  profile_ids: [],
+  grace_minutes: 60,
+};
+
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>({ generatedAt: "", profiles: [] });
   const [busyProfile, setBusyProfile] = useState<string>("");
@@ -72,11 +118,15 @@ function App() {
   const [autoRotateEnabled, setAutoRotateEnabled] = useState<boolean>(false);
   const [autoRotateThreshold, setAutoRotateThreshold] = useState<number>(5);
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({ hasCodexCli: true, codexInstallUrl: "https://github.com/openai/codex" });
+  const [trigger, setTrigger] = useState<TriggerConfig>(DEFAULT_TRIGGER);
+  const [lastRun, setLastRun] = useState<TriggerRun | null>(null);
+  const [topNPreview, setTopNPreview] = useState<string[]>([]);
 
   useEffect(() => {
     void loadInitial();
     void loadConfig();
     void loadSystemStatus();
+    void loadTrigger();
   }, []);
 
   useEffect(() => {
@@ -86,6 +136,25 @@ function App() {
     }, 15000);
     return () => window.clearInterval(timer);
   }, [systemStatus.hasCodexCli]);
+
+  useEffect(() => {
+    if (!trigger.enabled || trigger.mode !== "top_n") {
+      setTopNPreview([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const preview = (await PreviewTriggerSelection(trigger as any)) as unknown as { selectedIds: string[] };
+        if (!cancelled) setTopNPreview(preview.selectedIds ?? []);
+      } catch {
+        if (!cancelled) setTopNPreview([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [trigger.enabled, trigger.mode, trigger.count, snapshot.profiles]);
 
   async function loadSystemStatus() {
     try {
@@ -114,6 +183,46 @@ function App() {
       if (typeof enabled === "boolean") setAutoRotateEnabled(enabled);
       if (typeof threshold === "number") setAutoRotateThreshold(threshold);
     } catch {}
+  }
+
+  async function loadTrigger() {
+    try {
+      const t = (await GetTriggerSettings()) as unknown as TriggerConfig;
+      setTrigger({ ...DEFAULT_TRIGGER, ...t, profile_ids: t.profile_ids ?? [] });
+    } catch {}
+    try {
+      const run = (await GetLastTriggerRun()) as unknown as TriggerRun | null;
+      setLastRun(run);
+    } catch {}
+  }
+
+  async function saveTrigger(next: TriggerConfig) {
+    setTrigger(next);
+    try {
+      await SaveTriggerSettings(next as any);
+    } catch {
+      setStatusText("ERROR: SAVE FAILED");
+    }
+  }
+
+  async function onTriggerNow() {
+    setStatusText("TRIGGERING...");
+    try {
+      const result = await TriggerNow();
+      applyAction(result);
+      const run = (await GetLastTriggerRun()) as unknown as TriggerRun | null;
+      setLastRun(run);
+    } catch {
+      setStatusText("ERROR: TRIGGER FAILED");
+    }
+  }
+
+  function toggleCustomProfile(id: string) {
+    const has = trigger.profile_ids.includes(id);
+    const profile_ids = has
+      ? trigger.profile_ids.filter((p) => p !== id)
+      : [...trigger.profile_ids, id];
+    void saveTrigger({ ...trigger, profile_ids });
   }
 
   async function loadInitial() {
@@ -166,6 +275,11 @@ function App() {
     if (providerFilter === "all") return snapshot.profiles;
     return snapshot.profiles.filter((p) => (p.provider || "unknown") === providerFilter);
   }, [providerFilter, snapshot.profiles]);
+
+  const codexProfiles = useMemo(
+    () => snapshot.profiles.filter((p) => p.provider.toLowerCase() === "codex"),
+    [snapshot.profiles]
+  );
 
   useEffect(() => {
     if (providerFilter !== "all" && !providerOptions.includes(providerFilter)) {
@@ -398,6 +512,124 @@ function App() {
                   <span>10%</span>
                   <span>20%</span>
                 </div>
+              </div>
+
+              <div className="bg-[rgba(0,243,255,0.05)] p-4 border border-[rgba(0,243,255,0.1)] space-y-4">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <div className="font-bold text-sm">AUTO_TRIGGER (OPENAI ONLY)</div>
+                    <div className="text-[10px] text-dim">Open 5H quota window on a schedule</div>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input
+                      type="checkbox"
+                      className="sr-only peer"
+                      checked={trigger.enabled}
+                      onChange={(e) => void saveTrigger({ ...trigger, enabled: e.target.checked })}
+                    />
+                    <div className="w-11 h-6 bg-gray-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-neon-cyan"></div>
+                  </label>
+                </div>
+
+                {trigger.enabled && (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[11px] text-dim">TRIGGER_TIME</span>
+                      <select
+                        className="trigger-select"
+                        value={trigger.time_of_day}
+                        onChange={(e) => void saveTrigger({ ...trigger, time_of_day: e.target.value })}
+                      >
+                        {TIME_SLOTS.map((slot) => (
+                          <option key={slot} value={slot}>{slot}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="flex gap-2">
+                      {(["all", "top_n", "custom"] as TriggerMode[]).map((m) => (
+                        <button
+                          key={m}
+                          onClick={() => void saveTrigger({ ...trigger, mode: m })}
+                          className={clsx("cyber-btn flex-1 text-[10px]", trigger.mode === m && "cyber-btn-solid")}
+                        >
+                          {m === "top_n" ? "TOP N" : m.toUpperCase()}
+                        </button>
+                      ))}
+                    </div>
+
+                    {trigger.mode === "top_n" && (
+                      <>
+                        <div className="flex justify-between items-center">
+                          <span className="text-[11px] text-dim">ACCOUNT_COUNT (best weekly quota)</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={Math.max(1, codexProfiles.length)}
+                            value={trigger.count}
+                            onChange={(e) => void saveTrigger({ ...trigger, count: Math.max(1, Number(e.target.value)) })}
+                            className="trigger-select w-16 text-center"
+                          />
+                        </div>
+
+                        {topNPreview.length > 0 && (
+                          <div className="trigger-preview">
+                            <div className="text-[10px] text-dim mb-1">WILL TRIGGER:</div>
+                            {topNPreview.map((id) => {
+                              const p = codexProfiles.find((c) => c.id === id);
+                              if (!p) return null;
+                              return (
+                                <div key={id} className="trigger-preview-row">
+                                  <span className="trigger-pick-name" title={p.label}>{p.label}</span>
+                                  <span className="trigger-pick-quota">WK {p.secondaryPercent}%</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
+                    )}
+
+                    {trigger.mode === "custom" && (
+                      <div className="trigger-picker">
+                        {codexProfiles.map((p) => (
+                          <label key={p.id} className={clsx("trigger-pick-row", trigger.profile_ids.includes(p.id) && "selected")}>
+                            <input
+                              type="checkbox"
+                              checked={trigger.profile_ids.includes(p.id)}
+                              onChange={() => toggleCustomProfile(p.id)}
+                            />
+                            <span className="trigger-pick-name" title={p.label}>{p.label}</span>
+                            <span className="trigger-pick-quota">5H {p.primaryPercent}% · WK {p.secondaryPercent}%</span>
+                          </label>
+                        ))}
+                        {codexProfiles.length === 0 && (
+                          <div className="text-[10px] text-dim">No Codex accounts.</div>
+                        )}
+                      </div>
+                    )}
+
+                    <button onClick={() => void onTriggerNow()} className="cyber-btn cyber-btn-solid w-full flex items-center justify-center gap-2">
+                      <Activity size={14} /> TRIGGER NOW
+                    </button>
+
+                    {lastRun && (
+                      <div className="trigger-lastrun">
+                        <div className="text-[10px] text-dim mb-1">
+                          LAST_RUN {new Date(lastRun.ran_at).toLocaleString()}
+                        </div>
+                        {lastRun.results.map((r) => (
+                          <div key={r.profile_id} className="trigger-lastrun-row">
+                            <span>{r.status === "opened" ? "✓" : r.status === "error" ? "✗" : "•"} {r.label}</span>
+                            <span className="text-dim">
+                              {r.status === "opened" ? (r.model_used || "opened") : r.status.replace("_", " ")}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           </div>

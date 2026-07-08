@@ -3,6 +3,7 @@ package main
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"time"
 
@@ -33,6 +34,7 @@ func (a *App) runBackgroundLoops() {
 		case <-refreshTicker.C:
 			a.mu.Lock()
 			_, _ = a.refreshLockedWithOptions(true, a.backgroundRefreshOptionsLocked())
+			a.maybeRunScheduledTriggerLocked()
 			a.mu.Unlock()
 		case <-backgroundUsageTicker.C:
 			a.mu.Lock()
@@ -220,4 +222,31 @@ func activeCodexSyncFingerprint(statuses []model.ProfileStatus) string {
 		return hex.EncodeToString(sum[:])
 	}
 	return ""
+}
+
+func (a *App) maybeRunScheduledTriggerLocked() {
+	statuses, err := a.svc.ProfileStatuses()
+	if err != nil {
+		return
+	}
+	ran, run, err := a.svc.RunScheduledTrigger(time.Now(), statuses)
+	if err != nil || !ran {
+		return
+	}
+	opened := countOpenedResults(run)
+	_ = notify.New().Send(notify.Event{
+		Title:   "Codex accounts triggered",
+		Message: fmt.Sprintf("Da trigger %d account luc %s", opened, run.RanAt.Local().Format("15:04")),
+		Level:   notify.LevelInfo,
+	})
+}
+
+func countOpenedResults(run model.TriggerRun) int {
+	count := 0
+	for _, r := range run.Results {
+		if r.Status == model.TriggerStatusOpened {
+			count++
+		}
+	}
+	return count
 }

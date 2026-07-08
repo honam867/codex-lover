@@ -3,7 +3,7 @@ package model
 import "time"
 
 const (
-	ToolCodex = "codex"
+	ToolCodex  = "codex"
 	ToolClaude = "claude"
 	ToolKimi   = "kimi"
 
@@ -11,19 +11,53 @@ const (
 	AuthStatusActive    = "active"
 	AuthStatusLoggedOut = "logged_out"
 	AuthStatusError     = "error"
+
+	TriggerModeAll    = "all"
+	TriggerModeTopN   = "top_n"
+	TriggerModeCustom = "custom"
+
+	TriggerStatusOpened        = "opened"
+	TriggerStatusSkippedNoAuth = "skipped_no_auth"
+	TriggerStatusNotEligible   = "not_eligible"
+	TriggerStatusError         = "error"
 )
 
 type Config struct {
-	Version             int          `json:"version"`
-	PollIntervalSeconds int          `json:"poll_interval_seconds"`
-	Daemon              DaemonConfig `json:"daemon"`
-	Profiles            []Profile    `json:"profiles"`
-	AutoRotateCodex     bool         `json:"auto_rotate_codex"`
-	AutoRotateThreshold float64      `json:"auto_rotate_threshold"`
+	Version             int           `json:"version"`
+	PollIntervalSeconds int           `json:"poll_interval_seconds"`
+	Daemon              DaemonConfig  `json:"daemon"`
+	Profiles            []Profile     `json:"profiles"`
+	AutoRotateCodex     bool          `json:"auto_rotate_codex"`
+	AutoRotateThreshold float64       `json:"auto_rotate_threshold"`
+	Trigger             TriggerConfig `json:"trigger"`
 }
 
 type DaemonConfig struct {
 	ListenAddress string `json:"listen_address"`
+}
+
+type TriggerConfig struct {
+	Enabled    bool     `json:"enabled"`
+	TimeOfDay  string   `json:"time_of_day"`
+	Mode       string   `json:"mode"`
+	Count      int      `json:"count"`
+	ProfileIDs []string `json:"profile_ids"`
+	GraceMins  int      `json:"grace_minutes"`
+}
+
+type TriggerRun struct {
+	RanAt   time.Time              `json:"ran_at"`
+	Manual  bool                   `json:"manual"`
+	Results []TriggerAccountResult `json:"results"`
+}
+
+type TriggerAccountResult struct {
+	ProfileID string `json:"profile_id"`
+	Label     string `json:"label"`
+	Status    string `json:"status"`
+	ModelUsed string `json:"model_used,omitempty"`
+	Verified  bool   `json:"verified"`
+	Error     string `json:"error,omitempty"`
 }
 
 type Profile struct {
@@ -42,10 +76,12 @@ type Profile struct {
 }
 
 type State struct {
-	Version   int                     `json:"version"`
-	UpdatedAt time.Time               `json:"updated_at"`
-	Profiles  map[string]ProfileState `json:"profiles"`
-	Sessions  []Session               `json:"sessions"`
+	Version         int                     `json:"version"`
+	UpdatedAt       time.Time               `json:"updated_at"`
+	Profiles        map[string]ProfileState `json:"profiles"`
+	Sessions        []Session               `json:"sessions"`
+	LastTriggerRun  *TriggerRun             `json:"last_trigger_run,omitempty"`
+	LastTriggerDate string                  `json:"last_trigger_date,omitempty"`
 }
 
 type ProfileState struct {

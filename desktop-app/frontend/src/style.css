@@ -380,3 +380,65 @@ select, input {
 select:focus, input:focus {
   border-color: var(--neon-cyan);
 }
+
+.trigger-select {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 243, 255, 0.2);
+  color: #d6faff;
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+.trigger-picker {
+  max-height: 220px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.trigger-pick-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid rgba(0, 243, 255, 0.12);
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.trigger-pick-row.selected {
+  border-color: rgba(0, 243, 255, 0.5);
+  background: rgba(0, 243, 255, 0.08);
+}
+.trigger-pick-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.trigger-pick-quota {
+  font-size: 9px;
+  color: #7fe9ff;
+  white-space: nowrap;
+}
+.trigger-lastrun {
+  border-top: 1px dashed rgba(0, 243, 255, 0.15);
+  padding-top: 8px;
+}
+.trigger-lastrun-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  padding: 2px 0;
+}
+.trigger-preview {
+  border-top: 1px dashed rgba(0, 243, 255, 0.15);
+  padding-top: 6px;
+}
+.trigger-preview-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  padding: 2px 0;
+}
