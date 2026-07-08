@@ -510,6 +510,120 @@ func formatTimePointer(value *time.Time) string {
 	return value.Local().Format("2006-01-02 15:04:05")
 }
 
+type TriggerPreview struct {
+	SelectedIds []string                       `json:"selectedIds"`
+	Skipped     []service.TriggerSelectionItem `json:"skipped"`
+}
+
+func (a *App) GetTriggerSettings() model.TriggerConfig {
+	if err := a.ensureReady(); err != nil {
+		return model.TriggerConfig{}
+	}
+	cfg, err := a.svc.LoadConfig()
+	if err != nil {
+		return model.TriggerConfig{}
+	}
+	return cfg.Trigger
+}
+
+func (a *App) SaveTriggerSettings(trigger model.TriggerConfig) error {
+	if err := a.ensureReady(); err != nil {
+		return err
+	}
+	cfg, err := a.svc.LoadConfig()
+	if err != nil {
+		return err
+	}
+	cfg.Trigger = normalizeTriggerConfig(trigger)
+	return a.svc.SaveConfig(cfg)
+}
+
+func (a *App) PreviewTriggerSelection(trigger model.TriggerConfig) TriggerPreview {
+	if err := a.ensureReady(); err != nil {
+		return TriggerPreview{SelectedIds: []string{}, Skipped: []service.TriggerSelectionItem{}}
+	}
+	statuses, err := a.svc.ProfileStatuses()
+	if err != nil {
+		return TriggerPreview{SelectedIds: []string{}, Skipped: []service.TriggerSelectionItem{}}
+	}
+	ids, skipped := a.svc.PreviewTriggerSelection(statuses, normalizeTriggerConfig(trigger))
+	if ids == nil {
+		ids = []string{}
+	}
+	if skipped == nil {
+		skipped = []service.TriggerSelectionItem{}
+	}
+	return TriggerPreview{SelectedIds: ids, Skipped: skipped}
+}
+
+func (a *App) GetLastTriggerRun() *model.TriggerRun {
+	if err := a.ensureReady(); err != nil {
+		return nil
+	}
+	run, err := a.svc.LastTriggerRun()
+	if err != nil {
+		return nil
+	}
+	return run
+}
+
+func (a *App) TriggerNow() ActionResponse {
+	if err := a.ensureReady(); err != nil {
+		return ActionResponse{Message: "Trigger failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+	a.mu.Lock()
+	statuses, err := a.svc.ProfileStatuses()
+	if err != nil {
+		a.mu.Unlock()
+		return ActionResponse{Message: "Trigger failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+	cfg, err := a.svc.LoadConfig()
+	if err != nil {
+		a.mu.Unlock()
+		return ActionResponse{Message: "Trigger failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+	run, runErr := a.svc.RunTrigger(statuses, cfg.Trigger, true)
+	a.mu.Unlock()
+
+	opened := 0
+	for _, r := range run.Results {
+		if r.Status == model.TriggerStatusOpened {
+			opened++
+		}
+	}
+	message := fmt.Sprintf("Triggered %d account(s)", opened)
+	errText := ""
+	if runErr != nil {
+		errText = runErr.Error()
+	}
+	snapshot, snapErr := a.snapshot(true)
+	if snapErr != nil {
+		snapshot = a.mustSnapshotFallback()
+	}
+	return ActionResponse{Message: message, Error: errText, Snapshot: snapshot}
+}
+
+func normalizeTriggerConfig(trigger model.TriggerConfig) model.TriggerConfig {
+	if strings.TrimSpace(trigger.TimeOfDay) == "" {
+		trigger.TimeOfDay = "08:00"
+	}
+	switch trigger.Mode {
+	case model.TriggerModeAll, model.TriggerModeTopN, model.TriggerModeCustom:
+	default:
+		trigger.Mode = model.TriggerModeAll
+	}
+	if trigger.Count < 1 {
+		trigger.Count = 1
+	}
+	if trigger.GraceMins <= 0 {
+		trigger.GraceMins = 60
+	}
+	if trigger.ProfileIDs == nil {
+		trigger.ProfileIDs = []string{}
+	}
+	return trigger
+}
+
 func launchAddAccountConsole(provider string) (string, error) {
 	cliPath, err := resolveCLIExecutable()
 	if err != nil {
