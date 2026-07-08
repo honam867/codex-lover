@@ -3,7 +3,7 @@ package model
 import "time"
 
 const (
-	ToolCodex = "codex"
+	ToolCodex  = "codex"
 	ToolClaude = "claude"
 	ToolKimi   = "kimi"
 
@@ -23,12 +23,12 @@ const (
 )
 
 type Config struct {
-	Version             int          `json:"version"`
-	PollIntervalSeconds int          `json:"poll_interval_seconds"`
-	Daemon              DaemonConfig `json:"daemon"`
-	Profiles            []Profile    `json:"profiles"`
-	AutoRotateCodex     bool         `json:"auto_rotate_codex"`
-	AutoRotateThreshold float64      `json:"auto_rotate_threshold"`
+	Version             int           `json:"version"`
+	PollIntervalSeconds int           `json:"poll_interval_seconds"`
+	Daemon              DaemonConfig  `json:"daemon"`
+	Profiles            []Profile     `json:"profiles"`
+	AutoRotateCodex     bool          `json:"auto_rotate_codex"`
+	AutoRotateThreshold float64       `json:"auto_rotate_threshold"`
 	Trigger             TriggerConfig `json:"trigger"`
 }
 
