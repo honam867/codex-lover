@@ -83,21 +83,15 @@ func (s *Service) RunScheduledTrigger(now time.Time, statuses []model.ProfileSta
 	if !fire {
 		return false, model.TriggerRun{}, nil
 	}
-
-	run, err := s.RunTrigger(statuses, cfg.Trigger, false)
-	if err != nil {
-		return true, run, err
-	}
-	// Reload (RunTrigger saved LastTriggerRun) then stamp the date.
-	state, err = s.store.LoadState()
-	if err != nil {
-		return true, run, err
-	}
+	// Claim today's slot BEFORE running so a persist failure or a crash mid-run
+	// cannot cause the 15s scheduler to re-fire (and re-hit every account) within
+	// the grace window. Fail-safe: if we cannot record the claim, skip rather than hammer.
 	state.LastTriggerDate = now.Format("2006-01-02")
 	if err := s.store.SaveState(state); err != nil {
-		return true, run, err
+		return false, model.TriggerRun{}, err
 	}
-	return true, run, nil
+	run, err := s.RunTrigger(statuses, cfg.Trigger, false)
+	return true, run, err
 }
 
 func (s *Service) LastTriggerRun() (*model.TriggerRun, error) {

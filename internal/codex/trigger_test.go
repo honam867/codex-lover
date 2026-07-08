@@ -67,6 +67,71 @@ func TestTriggerWindowAllModelsRejected(t *testing.T) {
 	}
 }
 
+func TestTriggerWindowRefreshOn401Succeeds(t *testing.T) {
+	respServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer old-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer respServer.Close()
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"new-token","refresh_token":"new-refresh"}`))
+	}))
+	defer refreshServer.Close()
+
+	oldResp, oldRefresh := responsesURL, refreshTokenURL
+	responsesURL, refreshTokenURL = respServer.URL, refreshServer.URL
+	defer func() { responsesURL, refreshTokenURL = oldResp, oldRefresh }()
+
+	auth := &ProfileAuth{AccessToken: "old-token", RefreshToken: "old-refresh", AccountID: "a"}
+	result, refreshedFile, err := TriggerWindow(auth, []string{"m1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result == nil || refreshedFile == nil {
+		t.Fatalf("expected result and a refreshed AuthFile")
+	}
+	if refreshedFile.Tokens.AccessToken != "new-token" || refreshedFile.Tokens.RefreshToken != "new-refresh" {
+		t.Fatalf("AuthFile must carry the new tokens, got %+v", refreshedFile.Tokens)
+	}
+	if auth.AccessToken != "new-token" {
+		t.Fatalf("auth should be updated in place to new-token")
+	}
+}
+
+func TestTriggerWindowRetryFailStillReturnsRefreshedToken(t *testing.T) {
+	respServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "Bearer old-token" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusBadRequest) // post-refresh retry fails (non-401)
+	}))
+	defer respServer.Close()
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"new-token","refresh_token":"new-refresh"}`))
+	}))
+	defer refreshServer.Close()
+
+	oldResp, oldRefresh := responsesURL, refreshTokenURL
+	responsesURL, refreshTokenURL = respServer.URL, refreshServer.URL
+	defer func() { responsesURL, refreshTokenURL = oldResp, oldRefresh }()
+
+	auth := &ProfileAuth{AccessToken: "old-token", RefreshToken: "old-refresh", AccountID: "a"}
+	result, refreshedFile, err := TriggerWindow(auth, []string{"m1"})
+	if err == nil {
+		t.Fatalf("expected error when post-refresh retry fails")
+	}
+	if result != nil {
+		t.Fatalf("expected nil result on failure")
+	}
+	if refreshedFile == nil || refreshedFile.Tokens.AccessToken != "new-token" {
+		t.Fatalf("refreshed token must be returned for persistence even when retry fails, got %+v", refreshedFile)
+	}
+}
+
 func TestBuildTriggerBodyPayload(t *testing.T) {
 	raw, err := buildTriggerBody("gpt-5.4-mini")
 	if err != nil {

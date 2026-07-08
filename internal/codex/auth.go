@@ -17,11 +17,12 @@ import (
 
 const (
 	authFileName     = "auth.json"
-	refreshTokenURL  = "https://auth.openai.com/oauth/token"
 	refreshClientID  = "app_EMoamEEZ73f0CkXaXp7hrann"
 	defaultUsageURL  = "https://chatgpt.com/backend-api/wham/usage"
 	defaultUserAgent = "codex-lover"
 )
+
+var refreshTokenURL = "https://auth.openai.com/oauth/token"
 
 type AuthFile struct {
 	OpenAIAPIKey string     `json:"OPENAI_API_KEY"`

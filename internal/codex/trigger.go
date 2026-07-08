@@ -47,24 +47,26 @@ func TriggerWindow(auth *ProfileAuth, models []string) (*TriggerResult, *AuthFil
 	if rerr != nil {
 		return nil, nil, fmt.Errorf("trigger unauthorized and refresh failed: %w", rerr)
 	}
-	result, _, err = doTriggerOnce(refreshed.AccessToken, refreshed.AccountID, models)
-	if err != nil {
-		return nil, nil, err
-	}
-
 	auth.AccessToken = refreshed.AccessToken
 	auth.RefreshToken = refreshed.RefreshToken
 	if refreshed.AccountID != "" {
 		auth.AccountID = refreshed.AccountID
 	}
-	return result, &AuthFile{
+	refreshedFile := &AuthFile{
 		Tokens: &TokenData{
 			AccessToken:  refreshed.AccessToken,
 			RefreshToken: refreshed.RefreshToken,
 			AccountID:    refreshed.AccountID,
 		},
 		LastRefresh: ptrTime(time.Now().UTC()),
-	}, nil
+	}
+	result, _, err = doTriggerOnce(refreshed.AccessToken, refreshed.AccountID, models)
+	if err != nil {
+		// The refresh succeeded and may have rotated the refresh token; return the
+		// new tokens so the caller persists them even though the trigger failed.
+		return nil, refreshedFile, err
+	}
+	return result, refreshedFile, nil
 }
 
 func doTriggerOnce(accessToken string, accountID string, models []string) (*TriggerResult, int, error) {
@@ -148,14 +150,17 @@ func TriggerFromCachedAuth(cacheRoot string, profileID string, models []string) 
 	if err != nil {
 		return nil, err
 	}
-	result, authFile, err := TriggerWindow(auth, models)
-	if err != nil {
-		return nil, err
-	}
+	result, authFile, triggerErr := TriggerWindow(auth, models)
 	if authFile != nil {
-		if err := persistRefreshedTokensAtPath(authPath, authFile); err != nil {
-			return nil, err
+		if perr := persistRefreshedTokensAtPath(authPath, authFile); perr != nil {
+			if triggerErr != nil {
+				return nil, triggerErr
+			}
+			return nil, perr
 		}
+	}
+	if triggerErr != nil {
+		return nil, triggerErr
 	}
 	return result, nil
 }
