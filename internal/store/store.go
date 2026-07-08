@@ -52,6 +52,14 @@ func DefaultConfig() model.Config {
 		Profiles:            []model.Profile{},
 		AutoRotateCodex:     false,
 		AutoRotateThreshold: 5.0,
+		Trigger: model.TriggerConfig{
+			Enabled:    false,
+			TimeOfDay:  "08:00",
+			Mode:       model.TriggerModeAll,
+			Count:      2,
+			ProfileIDs: []string{},
+			GraceMins:  60,
+		},
 	}
 }
 
@@ -217,6 +225,18 @@ func (s *Store) loadConfigUnlocked() (model.Config, error) {
 	}
 	if cfg.AutoRotateThreshold == 0 {
 		cfg.AutoRotateThreshold = 5.0
+	}
+	if strings.TrimSpace(cfg.Trigger.TimeOfDay) == "" {
+		cfg.Trigger.TimeOfDay = "08:00"
+	}
+	if strings.TrimSpace(cfg.Trigger.Mode) == "" {
+		cfg.Trigger.Mode = model.TriggerModeAll
+	}
+	if cfg.Trigger.Count <= 0 {
+		cfg.Trigger.Count = 2
+	}
+	if cfg.Trigger.GraceMins <= 0 {
+		cfg.Trigger.GraceMins = 60
 	}
 	return cfg, nil
 }
