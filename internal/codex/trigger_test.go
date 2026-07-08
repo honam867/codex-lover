@@ -1,6 +1,7 @@
 package codex
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -63,5 +64,26 @@ func TestTriggerWindowAllModelsRejected(t *testing.T) {
 	auth := &ProfileAuth{AccessToken: "tok", AccountID: "a"}
 	if _, _, err := TriggerWindow(auth, []string{"m1", "m2"}); err == nil {
 		t.Fatalf("expected error when all models rejected")
+	}
+}
+
+func TestBuildTriggerBodyPayload(t *testing.T) {
+	raw, err := buildTriggerBody("gpt-5.4-mini")
+	if err != nil {
+		t.Fatalf("buildTriggerBody error: %v", err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if payload["model"] != "gpt-5.4-mini" {
+		t.Fatalf("model = %v", payload["model"])
+	}
+	if _, present := payload["max_output_tokens"]; present {
+		t.Fatalf("max_output_tokens must not be present (endpoint rejects it)")
+	}
+	reasoning, ok := payload["reasoning"].(map[string]any)
+	if !ok || reasoning["effort"] != "low" {
+		t.Fatalf("reasoning.effort must be \"low\", got %v", payload["reasoning"])
 	}
 }

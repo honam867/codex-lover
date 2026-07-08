@@ -15,9 +15,10 @@ import (
 var (
 	responsesURL = "https://chatgpt.com/backend-api/codex/responses"
 
-	// DefaultTriggerModels is the cheapest-first preference order. The first
-	// model the backend accepts is used. Confirmed/adjusted by the Phase 0 probe.
-	DefaultTriggerModels = []string{"gpt-5.4-nano", "gpt-5.4-mini", "gpt-5.1-codex-mini", "gpt-5.1-codex"}
+	// DefaultTriggerModels is the cheapest-first preference order for
+	// ChatGPT-account Codex, confirmed by the Phase 0 live probe. Only these
+	// models are accepted on the /responses endpoint for a ChatGPT account.
+	DefaultTriggerModels = []string{"gpt-5.4-mini", "gpt-5.5", "gpt-5.4"}
 )
 
 // TriggerResult reports the outcome of a successful trigger.
@@ -124,10 +125,9 @@ func buildTriggerBody(modelName string) ([]byte, error) {
 				},
 			},
 		},
-		"reasoning":         map[string]any{"effort": "minimal"},
-		"store":             false,
-		"stream":            true,
-		"max_output_tokens": 16,
+		"reasoning": map[string]any{"effort": "low"},
+		"store":     false,
+		"stream":    true,
 	}
 	return json.Marshal(payload)
 }
