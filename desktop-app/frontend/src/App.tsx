@@ -24,6 +24,7 @@ import {
   GetLastTriggerRun,
   LogoutProfile,
   OpenCodexInstallPage,
+  PreviewTriggerSelection,
   RefreshSnapshot,
   SaveTriggerSettings,
   SetAutoRotateCodex,
@@ -119,6 +120,7 @@ function App() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({ hasCodexCli: true, codexInstallUrl: "https://github.com/openai/codex" });
   const [trigger, setTrigger] = useState<TriggerConfig>(DEFAULT_TRIGGER);
   const [lastRun, setLastRun] = useState<TriggerRun | null>(null);
+  const [topNPreview, setTopNPreview] = useState<string[]>([]);
 
   useEffect(() => {
     void loadInitial();
@@ -134,6 +136,25 @@ function App() {
     }, 15000);
     return () => window.clearInterval(timer);
   }, [systemStatus.hasCodexCli]);
+
+  useEffect(() => {
+    if (!trigger.enabled || trigger.mode !== "top_n") {
+      setTopNPreview([]);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const preview = (await PreviewTriggerSelection(trigger as any)) as unknown as { selectedIds: string[] };
+        if (!cancelled) setTopNPreview(preview.selectedIds ?? []);
+      } catch {
+        if (!cancelled) setTopNPreview([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [trigger.enabled, trigger.mode, trigger.count, snapshot.profiles]);
 
   async function loadSystemStatus() {
     try {
@@ -538,17 +559,35 @@ function App() {
                     </div>
 
                     {trigger.mode === "top_n" && (
-                      <div className="flex justify-between items-center">
-                        <span className="text-[11px] text-dim">ACCOUNT_COUNT (best weekly quota)</span>
-                        <input
-                          type="number"
-                          min={1}
-                          max={Math.max(1, codexProfiles.length)}
-                          value={trigger.count}
-                          onChange={(e) => void saveTrigger({ ...trigger, count: Math.max(1, Number(e.target.value)) })}
-                          className="trigger-select w-16 text-center"
-                        />
-                      </div>
+                      <>
+                        <div className="flex justify-between items-center">
+                          <span className="text-[11px] text-dim">ACCOUNT_COUNT (best weekly quota)</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={Math.max(1, codexProfiles.length)}
+                            value={trigger.count}
+                            onChange={(e) => void saveTrigger({ ...trigger, count: Math.max(1, Number(e.target.value)) })}
+                            className="trigger-select w-16 text-center"
+                          />
+                        </div>
+
+                        {topNPreview.length > 0 && (
+                          <div className="trigger-preview">
+                            <div className="text-[10px] text-dim mb-1">SẼ TRIGGER:</div>
+                            {topNPreview.map((id) => {
+                              const p = codexProfiles.find((c) => c.id === id);
+                              if (!p) return null;
+                              return (
+                                <div key={id} className="trigger-preview-row">
+                                  <span className="trigger-pick-name" title={p.label}>{p.label}</span>
+                                  <span className="trigger-pick-quota">WK {p.secondaryPercent}%</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </>
                     )}
 
                     {trigger.mode === "custom" && (
