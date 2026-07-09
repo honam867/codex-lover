@@ -442,3 +442,37 @@ select:focus, input:focus {
   font-size: 10px;
   padding: 2px 0;
 }
+.card-meta {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.card-meta-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: #7fe9ff;
+}
+.deletion-log {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+.deletion-log-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10px;
+}
+.deletion-log-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.deletion-log-meta {
+  color: #7fe9ff;
+  white-space: nowrap;
+}

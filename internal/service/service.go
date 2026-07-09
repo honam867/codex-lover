@@ -627,6 +627,10 @@ func (s *Service) LogoutProfile(profileID string) (LogoutResult, error) {
 		return result, err
 	}
 
+	// Best-effort: the profile is already removed. A deletion-history write
+	// failure must not report the successful deletion as failed.
+	_ = s.recordDeletion(selected.Profile)
+
 	return result, nil
 }
 

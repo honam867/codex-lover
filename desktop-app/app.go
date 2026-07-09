@@ -40,6 +40,9 @@ type ProfileCard struct {
 	LastError           string `json:"lastError"`
 	CanLoginFromCache   bool   `json:"canLoginFromCache"`
 	LastRefreshedAtText string `json:"lastRefreshedAtText"`
+	CreatedAtText       string `json:"createdAtText"`
+	LastTriggeredAtText string `json:"lastTriggeredAtText"`
+	LastTriggeredModel  string `json:"lastTriggeredModel"`
 }
 
 type ActionResponse struct {
@@ -183,7 +186,9 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 			Snapshot: a.mustSnapshotFallback(),
 		}
 	}
+	a.mu.Lock()
 	result, err := a.svc.LogoutProfile(profileID)
+	a.mu.Unlock()
 	if err != nil {
 		return ActionResponse{
 			Message:  "Delete failed",
@@ -376,6 +381,9 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			LastError:           nonEmpty(status.State.LastError, "-"),
 			CanLoginFromCache:   canLoginFromCache,
 			LastRefreshedAtText: formatTimePointer(status.State.LastRefreshedAt),
+			CreatedAtText:       formatCreatedAt(status.Profile.CreatedAt),
+			LastTriggeredAtText: formatLastTriggeredAt(status.State.LastTriggeredAt),
+			LastTriggeredModel:  status.State.LastTriggeredModel,
 		})
 	}
 	return Snapshot{
@@ -510,6 +518,20 @@ func formatTimePointer(value *time.Time) string {
 	return value.Local().Format("2006-01-02 15:04:05")
 }
 
+func formatCreatedAt(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Local().Format("02/01/2006")
+}
+
+func formatLastTriggeredAt(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.Local().Format("15:04 02/01")
+}
+
 type TriggerPreview struct {
 	SelectedIds []string                       `json:"selectedIds"`
 	Skipped     []service.TriggerSelectionItem `json:"skipped"`
@@ -554,6 +576,17 @@ func (a *App) PreviewTriggerSelection(trigger model.TriggerConfig) TriggerPrevie
 		skipped = []service.TriggerSelectionItem{}
 	}
 	return TriggerPreview{SelectedIds: ids, Skipped: skipped}
+}
+
+func (a *App) GetDeletionHistory() []model.DeletedAccountRecord {
+	if err := a.ensureReady(); err != nil {
+		return []model.DeletedAccountRecord{}
+	}
+	history, err := a.svc.DeletionHistory()
+	if err != nil || history == nil {
+		return []model.DeletedAccountRecord{}
+	}
+	return history
 }
 
 func (a *App) GetLastTriggerRun() *model.TriggerRun {
