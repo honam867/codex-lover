@@ -49,6 +49,9 @@ type ProfileCard = {
   lastError: string;
   canLoginFromCache: boolean;
   lastRefreshedAtText: string;
+  createdAtText: string;
+  lastTriggeredAtText: string;
+  lastTriggeredModel: string;
 };
 
 type Snapshot = {
@@ -397,6 +400,27 @@ function App() {
                   </div>
                 </div>
               </div>
+
+              {profile.provider.toLowerCase() === "codex" &&
+                (profile.lastTriggeredAtText || profile.createdAtText) && (
+                  <div className="card-meta">
+                    {profile.lastTriggeredAtText && (
+                      <div className="card-meta-row">
+                        <span className="text-dim">Trigger</span>
+                        <span>
+                          {profile.lastTriggeredAtText}
+                          {profile.lastTriggeredModel ? ` · ${profile.lastTriggeredModel}` : ""}
+                        </span>
+                      </div>
+                    )}
+                    {profile.createdAtText && (
+                      <div className="card-meta-row">
+                        <span className="text-dim">Added</span>
+                        <span>{profile.createdAtText}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
               <div className="flex justify-between items-center mt-6 pt-4 border-t border-dashed border-[rgba(0,243,255,0.1)]">
                 <span className={clsx("text-[9px] px-2 py-0.5 rounded", badgeClass(profile.authStatus))}>
