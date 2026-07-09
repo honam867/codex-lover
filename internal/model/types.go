@@ -82,6 +82,15 @@ type State struct {
 	Sessions        []Session               `json:"sessions"`
 	LastTriggerRun  *TriggerRun             `json:"last_trigger_run,omitempty"`
 	LastTriggerDate string                  `json:"last_trigger_date,omitempty"`
+	DeletionHistory []DeletedAccountRecord  `json:"deletion_history,omitempty"`
+}
+
+type DeletedAccountRecord struct {
+	ProfileID string    `json:"profile_id"`
+	Label     string    `json:"label"`
+	Email     string    `json:"email,omitempty"`
+	Provider  string    `json:"provider"`
+	DeletedAt time.Time `json:"deleted_at"`
 }
 
 type ProfileState struct {

@@ -576,6 +576,17 @@ func (a *App) PreviewTriggerSelection(trigger model.TriggerConfig) TriggerPrevie
 	return TriggerPreview{SelectedIds: ids, Skipped: skipped}
 }
 
+func (a *App) GetDeletionHistory() []model.DeletedAccountRecord {
+	if err := a.ensureReady(); err != nil {
+		return []model.DeletedAccountRecord{}
+	}
+	history, err := a.svc.DeletionHistory()
+	if err != nil || history == nil {
+		return []model.DeletedAccountRecord{}
+	}
+	return history
+}
+
 func (a *App) GetLastTriggerRun() *model.TriggerRun {
 	if err := a.ensureReady(); err != nil {
 		return nil

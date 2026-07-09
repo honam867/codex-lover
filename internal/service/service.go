@@ -627,6 +627,10 @@ func (s *Service) LogoutProfile(profileID string) (LogoutResult, error) {
 		return result, err
 	}
 
+	if err := s.recordDeletion(selected.Profile); err != nil {
+		return result, err
+	}
+
 	return result, nil
 }
 
