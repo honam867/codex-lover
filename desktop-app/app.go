@@ -186,7 +186,9 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 			Snapshot: a.mustSnapshotFallback(),
 		}
 	}
+	a.mu.Lock()
 	result, err := a.svc.LogoutProfile(profileID)
+	a.mu.Unlock()
 	if err != nil {
 		return ActionResponse{
 			Message:  "Delete failed",
