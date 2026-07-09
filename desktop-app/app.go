@@ -40,6 +40,9 @@ type ProfileCard struct {
 	LastError           string `json:"lastError"`
 	CanLoginFromCache   bool   `json:"canLoginFromCache"`
 	LastRefreshedAtText string `json:"lastRefreshedAtText"`
+	CreatedAtText       string `json:"createdAtText"`
+	LastTriggeredAtText string `json:"lastTriggeredAtText"`
+	LastTriggeredModel  string `json:"lastTriggeredModel"`
 }
 
 type ActionResponse struct {
@@ -376,6 +379,9 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			LastError:           nonEmpty(status.State.LastError, "-"),
 			CanLoginFromCache:   canLoginFromCache,
 			LastRefreshedAtText: formatTimePointer(status.State.LastRefreshedAt),
+			CreatedAtText:       formatCreatedAt(status.Profile.CreatedAt),
+			LastTriggeredAtText: formatLastTriggeredAt(status.State.LastTriggeredAt),
+			LastTriggeredModel:  status.State.LastTriggeredModel,
 		})
 	}
 	return Snapshot{
@@ -508,6 +514,20 @@ func formatTimePointer(value *time.Time) string {
 		return "-"
 	}
 	return value.Local().Format("2006-01-02 15:04:05")
+}
+
+func formatCreatedAt(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Local().Format("02/01/2006")
+}
+
+func formatLastTriggeredAt(value *time.Time) string {
+	if value == nil {
+		return ""
+	}
+	return value.Local().Format("15:04 02/01")
 }
 
 type TriggerPreview struct {

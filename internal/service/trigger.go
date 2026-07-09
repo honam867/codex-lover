@@ -58,13 +58,34 @@ func (s *Service) verifyTriggerOpened(sourceProfileID string) bool {
 	return usage.Primary.ResetsAt.After(time.Now())
 }
 
+// applyTriggerStamps records the run as the last run and stamps each
+// successfully-opened account's per-profile last-trigger time and model.
+func applyTriggerStamps(state model.State, run model.TriggerRun) model.State {
+	if state.Profiles == nil {
+		state.Profiles = map[string]model.ProfileState{}
+	}
+	saved := run
+	state.LastTriggerRun = &saved
+	for _, res := range run.Results {
+		if res.Status != model.TriggerStatusOpened {
+			continue
+		}
+		ps := state.Profiles[res.ProfileID]
+		ps.ProfileID = res.ProfileID
+		ranAt := run.RanAt
+		ps.LastTriggeredAt = &ranAt
+		ps.LastTriggeredModel = res.ModelUsed
+		state.Profiles[res.ProfileID] = ps
+	}
+	return state
+}
+
 func (s *Service) persistLastTriggerRun(run model.TriggerRun) error {
 	state, err := s.store.LoadState()
 	if err != nil {
 		return err
 	}
-	saved := run
-	state.LastTriggerRun = &saved
+	state = applyTriggerStamps(state, run)
 	return s.store.SaveState(state)
 }
 

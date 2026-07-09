@@ -93,6 +93,8 @@ type ProfileState struct {
 	AuthFingerprint     string         `json:"-"`
 	LastSeenActiveAt    *time.Time     `json:"last_seen_active_at,omitempty"`
 	LastSeenLoggedOutAt *time.Time     `json:"last_seen_logged_out_at,omitempty"`
+	LastTriggeredAt     *time.Time     `json:"last_triggered_at,omitempty"`
+	LastTriggeredModel  string         `json:"last_triggered_model,omitempty"`
 }
 
 type UsageSnapshot struct {
