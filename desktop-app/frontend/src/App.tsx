@@ -17,6 +17,7 @@ import {
   ActivateProfile,
   AddAccount,
   GetConfig,
+  GetDeletionHistory,
   GetInitialSnapshot,
   GetSnapshot,
   GetSystemStatus,
@@ -96,6 +97,14 @@ type TriggerRun = {
   results: TriggerAccountResult[];
 };
 
+type DeletedAccountRecord = {
+  profile_id: string;
+  label: string;
+  email?: string;
+  provider: string;
+  deleted_at: string;
+};
+
 const TIME_SLOTS: string[] = Array.from({ length: 48 }, (_, i) => {
   const h = String(Math.floor(i / 2)).padStart(2, "0");
   const m = i % 2 === 0 ? "00" : "30";
@@ -124,6 +133,7 @@ function App() {
   const [trigger, setTrigger] = useState<TriggerConfig>(DEFAULT_TRIGGER);
   const [lastRun, setLastRun] = useState<TriggerRun | null>(null);
   const [topNPreview, setTopNPreview] = useState<string[]>([]);
+  const [deletionHistory, setDeletionHistory] = useState<DeletedAccountRecord[]>([]);
 
   useEffect(() => {
     void loadInitial();
@@ -139,6 +149,18 @@ function App() {
     }, 15000);
     return () => window.clearInterval(timer);
   }, [systemStatus.hasCodexCli]);
+
+  useEffect(() => {
+    if (!showSettingsModal) return;
+    void (async () => {
+      try {
+        const h = (await GetDeletionHistory()) as unknown as DeletedAccountRecord[];
+        setDeletionHistory(h ?? []);
+      } catch {
+        setDeletionHistory([]);
+      }
+    })();
+  }, [showSettingsModal]);
 
   useEffect(() => {
     if (!trigger.enabled || trigger.mode !== "top_n") {
@@ -653,6 +675,26 @@ function App() {
                       </div>
                     )}
                   </>
+                )}
+              </div>
+
+              <div className="bg-[rgba(0,243,255,0.05)] p-4 border border-[rgba(0,243,255,0.1)]">
+                <div className="font-bold text-sm mb-3">DELETION_LOG</div>
+                {deletionHistory.length === 0 ? (
+                  <div className="text-[10px] text-dim">No deletions yet.</div>
+                ) : (
+                  <div className="deletion-log">
+                    {deletionHistory.map((d, i) => (
+                      <div key={`${d.profile_id}-${i}`} className="deletion-log-row">
+                        <span className="deletion-log-name" title={d.email || d.label}>
+                          {d.label || d.email || d.profile_id}
+                        </span>
+                        <span className="deletion-log-meta">
+                          {(d.provider || "").toUpperCase()} · {new Date(d.deleted_at).toLocaleString()}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
