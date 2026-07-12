@@ -476,3 +476,6 @@ select:focus, input:focus {
   color: #7fe9ff;
   white-space: nowrap;
 }
+.account-card-clickable {
+  cursor: pointer;
+}

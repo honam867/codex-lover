@@ -31,6 +31,7 @@ import {
   SetAutoRotateCodex,
   SetAutoRotateThreshold,
   TriggerNow,
+  UpdateProfileMeta,
 } from "../wailsjs/go/main/App";
 import clsx from "clsx";
 
@@ -53,6 +54,8 @@ type ProfileCard = {
   createdAtText: string;
   lastTriggeredAtText: string;
   lastTriggeredModel: string;
+  price: number;
+  createdAtISO: string;
 };
 
 type Snapshot = {
@@ -134,6 +137,9 @@ function App() {
   const [lastRun, setLastRun] = useState<TriggerRun | null>(null);
   const [topNPreview, setTopNPreview] = useState<string[]>([]);
   const [deletionHistory, setDeletionHistory] = useState<DeletedAccountRecord[]>([]);
+  const [editProfile, setEditProfile] = useState<ProfileCard | null>(null);
+  const [editDate, setEditDate] = useState<string>("");
+  const [editPrice, setEditPrice] = useState<number>(0);
 
   useEffect(() => {
     void loadInitial();
@@ -292,6 +298,19 @@ function App() {
     applyAction(result);
   }
 
+  function openEdit(profile: ProfileCard) {
+    setEditProfile(profile);
+    setEditDate(profile.createdAtISO || "");
+    setEditPrice(profile.price || 0);
+  }
+
+  async function saveEdit() {
+    if (!editProfile) return;
+    const result = await UpdateProfileMeta(editProfile.id, editDate, editPrice);
+    setEditProfile(null);
+    applyAction(result);
+  }
+
   const providerOptions = useMemo(() => {
     return Array.from(new Set(snapshot.profiles.map((p) => p.provider || "unknown"))).sort();
   }, [snapshot.profiles]);
@@ -375,10 +394,12 @@ function App() {
 
         <div className="dashboard-grid">
           {sortedProfiles.map((profile) => (
-            <article 
-              key={profile.id} 
+            <article
+              key={profile.id}
+              onClick={() => { if (profile.provider.toLowerCase() === "codex") openEdit(profile); }}
               className={clsx(
-                "account-card", 
+                "account-card",
+                profile.provider.toLowerCase() === "codex" && "account-card-clickable",
                 profile.isActive && `active active-${profile.provider.toLowerCase()}`
               )}
             >
@@ -440,8 +461,14 @@ function App() {
               </div>
 
               {profile.provider.toLowerCase() === "codex" &&
-                (profile.lastTriggeredAtText || profile.createdAtText) && (
+                (profile.price > 0 || profile.lastTriggeredAtText || profile.createdAtText) && (
                   <div className="card-meta">
+                    {profile.price > 0 && (
+                      <div className="card-meta-row">
+                        <span className="text-dim">Giá</span>
+                        <span>{formatVND(profile.price)}</span>
+                      </div>
+                    )}
                     {profile.lastTriggeredAtText && (
                       <div className="card-meta-row">
                         <span className="text-dim">Trigger</span>
@@ -466,8 +493,8 @@ function App() {
                 </span>
                 <div className="flex gap-2">
                   {profile.canLoginFromCache && (
-                    <button 
-                      onClick={() => void onActivate(profile.id)}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); void onActivate(profile.id); }}
                       className="cyber-btn p-1.5"
                       disabled={busyProfile === profile.id}
                       title="RE-AUTHENTICATE"
@@ -475,8 +502,8 @@ function App() {
                       <ShieldCheck size={14} />
                     </button>
                   )}
-                  <button 
-                    onClick={() => void onDelete(profile.id, profile.label)}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); void onDelete(profile.id, profile.label); }}
                     className="cyber-btn cyber-btn-danger p-1.5"
                     disabled={busyProfile === profile.id}
                     title="TERMINATE"
@@ -718,6 +745,42 @@ function App() {
         </div>
       )}
 
+      {editProfile && (
+        <div className="modal-overlay" onClick={() => setEditProfile(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-neon text-lg font-bold">EDIT_ACCOUNT</h2>
+              <button onClick={() => setEditProfile(null)}><X size={20} /></button>
+            </div>
+            <div className="space-y-5">
+              <div>
+                <div className="text-[11px] text-dim mb-1">NGÀY ADD</div>
+                <input
+                  type="date"
+                  className="trigger-select w-full"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <div className="text-[11px] text-dim mb-1">GIÁ TIỀN (VNĐ)</div>
+                <input
+                  type="number"
+                  min={0}
+                  className="trigger-select w-full"
+                  value={editPrice}
+                  onChange={(e) => setEditPrice(Math.max(0, Number(e.target.value)))}
+                />
+                {editPrice > 0 && <div className="text-[10px] text-dim mt-1">{formatVND(editPrice)}</div>}
+              </div>
+              <button onClick={() => void saveEdit()} className="cyber-btn cyber-btn-solid w-full">
+                LƯU
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!systemStatus.hasCodexCli && (
         <div className="modal-overlay modal-overlay-blocking">
           <div className="modal-content prerequisite-modal">
@@ -746,6 +809,9 @@ function App() {
     </div>
   );
 }
+
+const formatVND = (value: number): string =>
+  `${new Intl.NumberFormat("vi-VN").format(value)} ₫`;
 
 const getProviderLogo = (p: string) => {
   switch (p.toLowerCase()) {
