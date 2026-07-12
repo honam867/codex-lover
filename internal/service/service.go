@@ -1825,6 +1825,9 @@ func mergeCanonicalProfile(canonical model.Profile, duplicate model.Profile, now
 	if canonical.CreatedAt.IsZero() || (!duplicate.CreatedAt.IsZero() && duplicate.CreatedAt.Before(canonical.CreatedAt)) {
 		canonical.CreatedAt = duplicate.CreatedAt
 	}
+	if canonical.Price == 0 {
+		canonical.Price = duplicate.Price
+	}
 	canonical.UpdatedAt = now
 	return canonical
 }
