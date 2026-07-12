@@ -69,6 +69,7 @@ type Profile struct {
 	Email          string    `json:"email,omitempty"`
 	AccountID      string    `json:"account_id,omitempty"`
 	Plan           string    `json:"plan,omitempty"`
+	Price          int64     `json:"price,omitempty"` // purchase price in VNĐ (integer dong)
 	Enabled        bool      `json:"enabled"`
 	AutoDiscovered bool      `json:"auto_discovered,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
