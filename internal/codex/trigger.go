@@ -27,7 +27,7 @@ type TriggerResult struct {
 	Status    int
 }
 
-// TriggerWindow sends one minimal request so the account's 5h quota window
+// TriggerWindow sends one minimal request so the account's weekly quota window
 // opens. It tries models in order until one is accepted, and refreshes the
 // token once on 401. On refresh it returns a non-nil *AuthFile the caller must
 // persist. The active account is never touched.

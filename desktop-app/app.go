@@ -43,6 +43,8 @@ type ProfileCard struct {
 	CreatedAtText       string `json:"createdAtText"`
 	LastTriggeredAtText string `json:"lastTriggeredAtText"`
 	LastTriggeredModel  string `json:"lastTriggeredModel"`
+	Price               int64  `json:"price"`
+	CreatedAtISO        string `json:"createdAtISO"`
 }
 
 type ActionResponse struct {
@@ -208,6 +210,31 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 		Message:  "Deleted " + profileLabel(result.Profile),
 		Snapshot: snapshot,
 	}
+}
+
+func (a *App) UpdateProfileMeta(profileID string, createdAtISO string, price int64) ActionResponse {
+	if err := a.ensureReady(); err != nil {
+		return ActionResponse{Message: "Update failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+	var createdAt time.Time
+	if s := strings.TrimSpace(createdAtISO); s != "" {
+		parsed, err := time.ParseInLocation("2006-01-02", s, time.Local)
+		if err != nil {
+			return ActionResponse{Message: "Update failed", Error: "invalid date: " + err.Error(), Snapshot: a.mustSnapshotFallback()}
+		}
+		createdAt = parsed.UTC()
+	}
+	a.mu.Lock()
+	_, err := a.svc.UpdateProfileMeta(profileID, createdAt, price)
+	a.mu.Unlock()
+	if err != nil {
+		return ActionResponse{Message: "Update failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+	snapshot, err := a.snapshot(true)
+	if err != nil {
+		return ActionResponse{Message: "Updated", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+	return ActionResponse{Message: "Updated", Snapshot: snapshot}
 }
 
 func (a *App) GetConfig() model.Config {
@@ -384,6 +411,8 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			CreatedAtText:       formatCreatedAt(status.Profile.CreatedAt),
 			LastTriggeredAtText: formatLastTriggeredAt(status.State.LastTriggeredAt),
 			LastTriggeredModel:  status.State.LastTriggeredModel,
+			Price:               status.Profile.Price,
+			CreatedAtISO:        formatCreatedAtISO(status.Profile.CreatedAt),
 		})
 	}
 	return Snapshot{
@@ -523,6 +552,13 @@ func formatCreatedAt(value time.Time) string {
 		return ""
 	}
 	return value.Local().Format("02/01/2006")
+}
+
+func formatCreatedAtISO(value time.Time) string {
+	if value.IsZero() {
+		return ""
+	}
+	return value.Local().Format("2006-01-02")
 }
 
 func formatLastTriggeredAt(value *time.Time) string {

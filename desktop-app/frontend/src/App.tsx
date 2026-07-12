@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import codexLogo from "./assets/provider-codex.svg";
 import claudeLogo from "./assets/provider-claude.svg";
 import kimiLogo from "./assets/provider-kimi.svg";
@@ -31,6 +31,7 @@ import {
   SetAutoRotateCodex,
   SetAutoRotateThreshold,
   TriggerNow,
+  UpdateProfileMeta,
 } from "../wailsjs/go/main/App";
 import clsx from "clsx";
 
@@ -53,6 +54,8 @@ type ProfileCard = {
   createdAtText: string;
   lastTriggeredAtText: string;
   lastTriggeredModel: string;
+  price: number;
+  createdAtISO: string;
 };
 
 type Snapshot = {
@@ -134,6 +137,26 @@ function App() {
   const [lastRun, setLastRun] = useState<TriggerRun | null>(null);
   const [topNPreview, setTopNPreview] = useState<string[]>([]);
   const [deletionHistory, setDeletionHistory] = useState<DeletedAccountRecord[]>([]);
+  const [editProfile, setEditProfile] = useState<ProfileCard | null>(null);
+  const [editDate, setEditDate] = useState<string>("");
+  const [editPrice, setEditPrice] = useState<number>(0);
+  const [pricePrompt, setPricePrompt] = useState<ProfileCard | null>(null);
+  const [promptPrice, setPromptPrice] = useState<number>(0);
+  const seenCodexIds = useRef<Set<string>>(new Set());
+  const seededCodexIds = useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!seededCodexIds.current) return;
+    const codex = snapshot.profiles.filter((p) => p.provider.toLowerCase() === "codex");
+    const fresh = codex.find((p) => !seenCodexIds.current.has(p.id));
+    if (fresh) {
+      codex.forEach((p) => seenCodexIds.current.add(p.id));
+      if (fresh.price === 0 && !pricePrompt) {
+        setPricePrompt(fresh);
+        setPromptPrice(0);
+      }
+    }
+  }, [snapshot.profiles, pricePrompt]);
 
   useEffect(() => {
     void loadInitial();
@@ -252,6 +275,10 @@ function App() {
 
   async function loadInitial() {
     const initial = await GetInitialSnapshot();
+    initial.profiles
+      .filter((p) => p.provider.toLowerCase() === "codex")
+      .forEach((p) => seenCodexIds.current.add(p.id));
+    seededCodexIds.current = true;
     setSnapshot(initial);
   }
 
@@ -289,6 +316,26 @@ function App() {
 
   async function onAdd(provider: string) {
     const result = await AddAccount(provider);
+    applyAction(result);
+  }
+
+  function openEdit(profile: ProfileCard) {
+    setEditProfile(profile);
+    setEditDate(profile.createdAtISO || "");
+    setEditPrice(profile.price || 0);
+  }
+
+  async function saveEdit() {
+    if (!editProfile) return;
+    const result = await UpdateProfileMeta(editProfile.id, editDate, editPrice);
+    setEditProfile(null);
+    applyAction(result);
+  }
+
+  async function savePrice() {
+    if (!pricePrompt) return;
+    const result = await UpdateProfileMeta(pricePrompt.id, pricePrompt.createdAtISO || "", promptPrice);
+    setPricePrompt(null);
     applyAction(result);
   }
 
@@ -375,10 +422,12 @@ function App() {
 
         <div className="dashboard-grid">
           {sortedProfiles.map((profile) => (
-            <article 
-              key={profile.id} 
+            <article
+              key={profile.id}
+              onClick={() => { if (profile.provider.toLowerCase() === "codex") openEdit(profile); }}
               className={clsx(
-                "account-card", 
+                "account-card",
+                profile.provider.toLowerCase() === "codex" && "account-card-clickable",
                 profile.isActive && `active active-${profile.provider.toLowerCase()}`
               )}
             >
@@ -396,36 +445,58 @@ function App() {
               </div>
 
               <div className="space-y-5">
-                <div className="meter-block">
-                  <div className="meter-label">
-                    <span>Quota: 5H</span>
-                    <span className="text-neon">{profile.primarySummary}</span>
+                {profile.provider.toLowerCase() === "codex" ? (
+                  <div className="meter-block">
+                    <div className="meter-label">
+                      <span>Quota: WEEKLY</span>
+                      <span className="text-neon">{profile.primarySummary}</span>
+                    </div>
+                    <div className="meter-track">
+                      <div
+                        className={clsx("meter-fill", meterTone(profile.primaryPercent))}
+                        style={{ width: `${profile.primaryPercent}%` }}
+                      />
+                    </div>
                   </div>
-                  <div className="meter-track">
-                    <div 
-                      className={clsx("meter-fill", meterTone(profile.primaryPercent))}
-                      style={{ width: `${profile.primaryPercent}%` }}
-                    />
-                  </div>
-                </div>
-
-                <div className="meter-block">
-                  <div className="meter-label">
-                    <span>Quota: WEEKLY</span>
-                    <span className="text-neon">{profile.secondarySummary}</span>
-                  </div>
-                  <div className="meter-track">
-                    <div 
-                      className={clsx("meter-fill", meterTone(profile.secondaryPercent))}
-                      style={{ width: `${profile.secondaryPercent}%` }}
-                    />
-                  </div>
-                </div>
+                ) : (
+                  <>
+                    <div className="meter-block">
+                      <div className="meter-label">
+                        <span>Quota: 5H</span>
+                        <span className="text-neon">{profile.primarySummary}</span>
+                      </div>
+                      <div className="meter-track">
+                        <div
+                          className={clsx("meter-fill", meterTone(profile.primaryPercent))}
+                          style={{ width: `${profile.primaryPercent}%` }}
+                        />
+                      </div>
+                    </div>
+                    <div className="meter-block">
+                      <div className="meter-label">
+                        <span>Quota: WEEKLY</span>
+                        <span className="text-neon">{profile.secondarySummary}</span>
+                      </div>
+                      <div className="meter-track">
+                        <div
+                          className={clsx("meter-fill", meterTone(profile.secondaryPercent))}
+                          style={{ width: `${profile.secondaryPercent}%` }}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
 
               {profile.provider.toLowerCase() === "codex" &&
-                (profile.lastTriggeredAtText || profile.createdAtText) && (
+                (profile.price > 0 || profile.lastTriggeredAtText || profile.createdAtText) && (
                   <div className="card-meta">
+                    {profile.price > 0 && (
+                      <div className="card-meta-row">
+                        <span className="text-dim">Giá</span>
+                        <span>{formatVND(profile.price)}</span>
+                      </div>
+                    )}
                     {profile.lastTriggeredAtText && (
                       <div className="card-meta-row">
                         <span className="text-dim">Trigger</span>
@@ -450,8 +521,8 @@ function App() {
                 </span>
                 <div className="flex gap-2">
                   {profile.canLoginFromCache && (
-                    <button 
-                      onClick={() => void onActivate(profile.id)}
+                    <button
+                      onClick={(e) => { e.stopPropagation(); void onActivate(profile.id); }}
                       className="cyber-btn p-1.5"
                       disabled={busyProfile === profile.id}
                       title="RE-AUTHENTICATE"
@@ -459,8 +530,8 @@ function App() {
                       <ShieldCheck size={14} />
                     </button>
                   )}
-                  <button 
-                    onClick={() => void onDelete(profile.id, profile.label)}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); void onDelete(profile.id, profile.label); }}
                     className="cyber-btn cyber-btn-danger p-1.5"
                     disabled={busyProfile === profile.id}
                     title="TERMINATE"
@@ -564,7 +635,7 @@ function App() {
                 <div className="flex justify-between items-center">
                   <div>
                     <div className="font-bold text-sm">AUTO_TRIGGER (OPENAI ONLY)</div>
-                    <div className="text-[10px] text-dim">Open 5H quota window on a schedule</div>
+                    <div className="text-[10px] text-dim">Open weekly quota window on a schedule</div>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -627,7 +698,7 @@ function App() {
                               return (
                                 <div key={id} className="trigger-preview-row">
                                   <span className="trigger-pick-name" title={p.label}>{p.label}</span>
-                                  <span className="trigger-pick-quota">WK {p.secondaryPercent}%</span>
+                                  <span className="trigger-pick-quota">WK {p.primaryPercent}%</span>
                                 </div>
                               );
                             })}
@@ -646,7 +717,7 @@ function App() {
                               onChange={() => toggleCustomProfile(p.id)}
                             />
                             <span className="trigger-pick-name" title={p.label}>{p.label}</span>
-                            <span className="trigger-pick-quota">5H {p.primaryPercent}% · WK {p.secondaryPercent}%</span>
+                            <span className="trigger-pick-quota">WK {p.primaryPercent}%</span>
                           </label>
                         ))}
                         {codexProfiles.length === 0 && (
@@ -702,6 +773,70 @@ function App() {
         </div>
       )}
 
+      {editProfile && (
+        <div className="modal-overlay" onClick={() => setEditProfile(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-neon text-lg font-bold">EDIT_ACCOUNT</h2>
+              <button onClick={() => setEditProfile(null)}><X size={20} /></button>
+            </div>
+            <div className="space-y-5">
+              <div>
+                <div className="text-[11px] text-dim mb-1">NGÀY ADD</div>
+                <input
+                  type="date"
+                  className="trigger-select w-full"
+                  value={editDate}
+                  onChange={(e) => setEditDate(e.target.value)}
+                />
+              </div>
+              <div>
+                <div className="text-[11px] text-dim mb-1">GIÁ TIỀN (VNĐ)</div>
+                <input
+                  type="number"
+                  min={0}
+                  className="trigger-select w-full"
+                  value={editPrice}
+                  onChange={(e) => setEditPrice(Math.max(0, Number(e.target.value)))}
+                />
+                {editPrice > 0 && <div className="text-[10px] text-dim mt-1">{formatVND(editPrice)}</div>}
+              </div>
+              <button onClick={() => void saveEdit()} className="cyber-btn cyber-btn-solid w-full">
+                LƯU
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pricePrompt && (
+        <div className="modal-overlay" onClick={() => setPricePrompt(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-neon text-lg font-bold">GIÁ TÀI KHOẢN</h2>
+              <button onClick={() => setPricePrompt(null)}><X size={20} /></button>
+            </div>
+            <div className="text-[11px] text-dim mb-3 truncate" title={pricePrompt.email}>
+              {pricePrompt.label || pricePrompt.email}
+            </div>
+            <input
+              type="number"
+              min={0}
+              autoFocus
+              placeholder="Nhập giá đã mua (VNĐ)"
+              className="trigger-select w-full"
+              value={promptPrice || ""}
+              onChange={(e) => setPromptPrice(Math.max(0, Number(e.target.value)))}
+            />
+            {promptPrice > 0 && <div className="text-[10px] text-dim mt-1">{formatVND(promptPrice)}</div>}
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setPricePrompt(null)} className="cyber-btn flex-1">SKIP</button>
+              <button onClick={() => void savePrice()} className="cyber-btn cyber-btn-solid flex-1">LƯU</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {!systemStatus.hasCodexCli && (
         <div className="modal-overlay modal-overlay-blocking">
           <div className="modal-content prerequisite-modal">
@@ -730,6 +865,9 @@ function App() {
     </div>
   );
 }
+
+const formatVND = (value: number): string =>
+  `${new Intl.NumberFormat("vi-VN").format(value)} ₫`;
 
 const getProviderLogo = (p: string) => {
   switch (p.toLowerCase()) {
