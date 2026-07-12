@@ -843,13 +843,13 @@ func (s *Service) AutoRotateCodex(statuses []model.ProfileStatus) (SwitchResult,
 		return SwitchResult{Checked: true, From: active.Profile, Reason: "no cached ready account"}, nil
 	}
 	sort.Slice(candidates, func(i, j int) bool {
-		return fiveHourRemaining(candidates[i]) > fiveHourRemaining(candidates[j])
+		return weeklyRemaining(candidates[i]) > weeklyRemaining(candidates[j])
 	})
 	top := candidates[0]
 	if top.Profile.ID == active.Profile.ID {
 		return SwitchResult{Checked: true, From: active.Profile, Reason: "active account is already best"}, nil
 	}
-	diff := fiveHourRemaining(top) - fiveHourRemaining(active)
+	diff := weeklyRemaining(top) - weeklyRemaining(active)
 	if diff <= cfg.AutoRotateThreshold {
 		return SwitchResult{Checked: true, From: active.Profile, Reason: fmt.Sprintf("top account diff %.2f%% <= threshold %.2f%%", diff, cfg.AutoRotateThreshold)}, nil
 	}
@@ -861,34 +861,29 @@ func (s *Service) AutoRotateCodex(statuses []model.ProfileStatus) (SwitchResult,
 		Changed: true,
 		From:    active.Profile,
 		To:      top.Profile,
-		Reason:  fmt.Sprintf("auto-rotate: top account has %.2f%% more 5h remaining", diff),
+		Reason:  fmt.Sprintf("auto-rotate: top account has %.2f%% more weekly remaining", diff),
 	}, nil
 }
 
-func fiveHourRemaining(status model.ProfileStatus) float64 {
+// weeklyWindow returns the account's sole rate-limit window. Codex dropped the
+// 5h window; the API now returns the weekly window as Primary (Secondary is a
+// legacy fallback).
+func weeklyWindow(status model.ProfileStatus) *model.UsageWindow {
 	if status.State.Usage == nil {
-		return 0
+		return nil
 	}
 	if status.State.Usage.Primary != nil {
-		return status.State.Usage.Primary.RemainingPercent
+		return status.State.Usage.Primary
 	}
-	if status.State.Usage.Secondary != nil {
-		return status.State.Usage.Secondary.RemainingPercent
-	}
-	return 0
+	return status.State.Usage.Secondary
 }
 
 func weeklyRemaining(status model.ProfileStatus) float64 {
-	if status.State.Usage == nil {
+	window := weeklyWindow(status)
+	if window == nil {
 		return 0
 	}
-	if status.State.Usage.Secondary != nil {
-		return status.State.Usage.Secondary.RemainingPercent
-	}
-	if status.State.Usage.Primary != nil {
-		return status.State.Usage.Primary.RemainingPercent
-	}
-	return 0
+	return window.RemainingPercent
 }
 
 func (s *Service) AutoSwitchLimitedCodex(statuses []model.ProfileStatus) (SwitchResult, error) {
@@ -1588,46 +1583,16 @@ func activeCodexStatus(statuses []model.ProfileStatus) (model.ProfileStatus, boo
 }
 
 func usageLimitReached(status model.ProfileStatus) bool {
-	if status.State.Usage == nil {
-		return false
-	}
-	return windowLimitReached(status.State.Usage.Primary) || windowLimitReached(status.State.Usage.Secondary)
-}
-
-func windowLimitReached(window *model.UsageWindow) bool {
+	window := weeklyWindow(status)
 	return window != nil && window.RemainingPercent <= 0.5
 }
 
 func quotaScore(status model.ProfileStatus, now time.Time) (float64, bool) {
-	if status.State.Usage == nil {
+	window := EffectiveWindowForDisplay(weeklyWindow(status), status.State.AuthStatus, now)
+	if window == nil || window.RemainingPercent <= 0.5 {
 		return 0, false
 	}
-	primary := EffectiveWindowForDisplay(status.State.Usage.Primary, status.State.AuthStatus, now)
-	secondary := EffectiveWindowForDisplay(status.State.Usage.Secondary, status.State.AuthStatus, now)
-	if primary == nil && secondary == nil {
-		return 0, false
-	}
-	score := 100.0
-	if primary != nil {
-		if primary.RemainingPercent <= 0.5 {
-			return 0, false
-		}
-		score = minFloat(score, primary.RemainingPercent)
-	}
-	if secondary != nil {
-		if secondary.RemainingPercent <= 0.5 {
-			return 0, false
-		}
-		score = minFloat(score, secondary.RemainingPercent)
-	}
-	return score, true
-}
-
-func minFloat(left float64, right float64) float64 {
-	if left < right {
-		return left
-	}
-	return right
+	return window.RemainingPercent, true
 }
 
 func FormatWindow(window *model.UsageWindow) string {

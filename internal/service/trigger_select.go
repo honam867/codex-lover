@@ -59,10 +59,6 @@ func selectTriggerTargets(
 			if wi != wj {
 				return wi > wj
 			}
-			pi, pj := fiveHourRemaining(eligible[i].Status), fiveHourRemaining(eligible[j].Status)
-			if pi != pj {
-				return pi > pj
-			}
 			return strings.ToLower(profileLabel(eligible[i].Status.Profile)) <
 				strings.ToLower(profileLabel(eligible[j].Status.Profile))
 		})
