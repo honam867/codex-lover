@@ -389,6 +389,38 @@ select:focus, input:focus {
   padding: 4px 8px;
   border-radius: 4px;
 }
+
+/* Roomy input for the edit/price modals + visible native date picker in dark UI */
+.modal-input {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 243, 255, 0.25);
+  color: #d6faff;
+  font-size: 14px;
+  padding: 11px 12px;
+  border-radius: 6px;
+  color-scheme: dark;
+  cursor: pointer;
+}
+.modal-input:focus {
+  border-color: var(--neon-cyan);
+  box-shadow: 0 0 0 2px rgba(0, 243, 255, 0.15);
+}
+.modal-input::-webkit-calendar-picker-indicator {
+  filter: invert(1);
+  opacity: 0.75;
+  cursor: pointer;
+}
+.modal-input::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+.modal-label {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
 .trigger-picker {
   max-height: 220px;
   overflow-y: auto;

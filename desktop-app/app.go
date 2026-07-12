@@ -230,7 +230,9 @@ func (a *App) UpdateProfileMeta(profileID string, createdAtISO string, price int
 	if err != nil {
 		return ActionResponse{Message: "Update failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
 	}
-	snapshot, err := a.snapshot(true)
+	// Metadata (date/price) is local config — rebuild the snapshot from current
+	// state without a full network refresh so saving is instant.
+	snapshot, err := a.snapshot(false)
 	if err != nil {
 		return ActionResponse{Message: "Updated", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
 	}

@@ -782,26 +782,30 @@ function App() {
             </div>
             <div className="space-y-5">
               <div>
-                <div className="text-[11px] text-dim mb-1">NGÀY ADD</div>
+                <div className="modal-label">NGÀY ADD</div>
                 <input
                   type="date"
-                  className="trigger-select w-full"
+                  className="modal-input"
                   value={editDate}
+                  onClick={(e) => {
+                    const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
+                    el.showPicker?.();
+                  }}
                   onChange={(e) => setEditDate(e.target.value)}
                 />
               </div>
               <div>
-                <div className="text-[11px] text-dim mb-1">GIÁ TIỀN (VNĐ)</div>
+                <div className="modal-label">GIÁ TIỀN (VNĐ)</div>
                 <input
                   type="number"
                   min={0}
-                  className="trigger-select w-full"
+                  className="modal-input"
                   value={editPrice}
                   onChange={(e) => setEditPrice(Math.max(0, Number(e.target.value)))}
                 />
-                {editPrice > 0 && <div className="text-[10px] text-dim mt-1">{formatVND(editPrice)}</div>}
+                {editPrice > 0 && <div className="text-[11px] text-neon mt-2">{formatVND(editPrice)}</div>}
               </div>
-              <button onClick={() => void saveEdit()} className="cyber-btn cyber-btn-solid w-full">
+              <button onClick={() => void saveEdit()} className="cyber-btn cyber-btn-solid w-full py-3">
                 LƯU
               </button>
             </div>
@@ -824,14 +828,14 @@ function App() {
               min={0}
               autoFocus
               placeholder="Nhập giá đã mua (VNĐ)"
-              className="trigger-select w-full"
+              className="modal-input"
               value={promptPrice || ""}
               onChange={(e) => setPromptPrice(Math.max(0, Number(e.target.value)))}
             />
-            {promptPrice > 0 && <div className="text-[10px] text-dim mt-1">{formatVND(promptPrice)}</div>}
+            {promptPrice > 0 && <div className="text-[11px] text-neon mt-2">{formatVND(promptPrice)}</div>}
             <div className="flex gap-3 mt-5">
-              <button onClick={() => setPricePrompt(null)} className="cyber-btn flex-1">SKIP</button>
-              <button onClick={() => void savePrice()} className="cyber-btn cyber-btn-solid flex-1">LƯU</button>
+              <button onClick={() => setPricePrompt(null)} className="cyber-btn flex-1 py-3">SKIP</button>
+              <button onClick={() => void savePrice()} className="cyber-btn cyber-btn-solid flex-1 py-3">LƯU</button>
             </div>
           </div>
         </div>
