@@ -146,12 +146,8 @@ function App() {
   const seededCodexIds = useRef<boolean>(false);
 
   useEffect(() => {
+    if (!seededCodexIds.current) return;
     const codex = snapshot.profiles.filter((p) => p.provider.toLowerCase() === "codex");
-    if (!seededCodexIds.current) {
-      codex.forEach((p) => seenCodexIds.current.add(p.id));
-      seededCodexIds.current = true;
-      return;
-    }
     const fresh = codex.find((p) => !seenCodexIds.current.has(p.id));
     if (fresh) {
       codex.forEach((p) => seenCodexIds.current.add(p.id));
@@ -279,6 +275,10 @@ function App() {
 
   async function loadInitial() {
     const initial = await GetInitialSnapshot();
+    initial.profiles
+      .filter((p) => p.provider.toLowerCase() === "codex")
+      .forEach((p) => seenCodexIds.current.add(p.id));
+    seededCodexIds.current = true;
     setSnapshot(initial);
   }
 
