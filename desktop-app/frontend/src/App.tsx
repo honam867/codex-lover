@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import codexLogo from "./assets/provider-codex.svg";
 import claudeLogo from "./assets/provider-claude.svg";
 import kimiLogo from "./assets/provider-kimi.svg";
@@ -140,6 +140,27 @@ function App() {
   const [editProfile, setEditProfile] = useState<ProfileCard | null>(null);
   const [editDate, setEditDate] = useState<string>("");
   const [editPrice, setEditPrice] = useState<number>(0);
+  const [pricePrompt, setPricePrompt] = useState<ProfileCard | null>(null);
+  const [promptPrice, setPromptPrice] = useState<number>(0);
+  const seenCodexIds = useRef<Set<string>>(new Set());
+  const seededCodexIds = useRef<boolean>(false);
+
+  useEffect(() => {
+    const codex = snapshot.profiles.filter((p) => p.provider.toLowerCase() === "codex");
+    if (!seededCodexIds.current) {
+      codex.forEach((p) => seenCodexIds.current.add(p.id));
+      seededCodexIds.current = true;
+      return;
+    }
+    const fresh = codex.find((p) => !seenCodexIds.current.has(p.id));
+    if (fresh) {
+      codex.forEach((p) => seenCodexIds.current.add(p.id));
+      if (fresh.price === 0 && !pricePrompt) {
+        setPricePrompt(fresh);
+        setPromptPrice(0);
+      }
+    }
+  }, [snapshot.profiles, pricePrompt]);
 
   useEffect(() => {
     void loadInitial();
@@ -308,6 +329,13 @@ function App() {
     if (!editProfile) return;
     const result = await UpdateProfileMeta(editProfile.id, editDate, editPrice);
     setEditProfile(null);
+    applyAction(result);
+  }
+
+  async function savePrice() {
+    if (!pricePrompt) return;
+    const result = await UpdateProfileMeta(pricePrompt.id, pricePrompt.createdAtISO || "", promptPrice);
+    setPricePrompt(null);
     applyAction(result);
   }
 
@@ -776,6 +804,34 @@ function App() {
               <button onClick={() => void saveEdit()} className="cyber-btn cyber-btn-solid w-full">
                 LƯU
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pricePrompt && (
+        <div className="modal-overlay" onClick={() => setPricePrompt(null)}>
+          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-neon text-lg font-bold">GIÁ TÀI KHOẢN</h2>
+              <button onClick={() => setPricePrompt(null)}><X size={20} /></button>
+            </div>
+            <div className="text-[11px] text-dim mb-3 truncate" title={pricePrompt.email}>
+              {pricePrompt.label || pricePrompt.email}
+            </div>
+            <input
+              type="number"
+              min={0}
+              autoFocus
+              placeholder="Nhập giá đã mua (VNĐ)"
+              className="trigger-select w-full"
+              value={promptPrice || ""}
+              onChange={(e) => setPromptPrice(Math.max(0, Number(e.target.value)))}
+            />
+            {promptPrice > 0 && <div className="text-[10px] text-dim mt-1">{formatVND(promptPrice)}</div>}
+            <div className="flex gap-3 mt-5">
+              <button onClick={() => setPricePrompt(null)} className="cyber-btn flex-1">SKIP</button>
+              <button onClick={() => void savePrice()} className="cyber-btn cyber-btn-solid flex-1">LƯU</button>
             </div>
           </div>
         </div>
