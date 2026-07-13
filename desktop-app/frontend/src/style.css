@@ -421,6 +421,70 @@ select:focus, input:focus {
   text-transform: uppercase;
   margin-bottom: 6px;
 }
+
+/* Modal layout (this project has NO Tailwind — utility classes are no-ops,
+   so modal structure needs real CSS). */
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 22px;
+}
+.modal-title {
+  margin: 0;
+  color: var(--neon-cyan);
+  text-shadow: var(--glow-text);
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  padding: 2px;
+}
+.modal-close:hover {
+  color: var(--neon-cyan);
+}
+.modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.modal-field {
+  display: flex;
+  flex-direction: column;
+}
+.modal-hint {
+  font-size: 12px;
+  color: var(--neon-cyan);
+  margin-top: 6px;
+}
+.modal-sub {
+  font-size: 12px;
+  color: var(--text-dim);
+  margin-bottom: 16px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.modal-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 20px;
+}
+.modal-actions .modal-btn {
+  flex: 1;
+}
+.modal-btn-full {
+  width: 100%;
+  margin-top: 4px;
+}
 .trigger-picker {
   max-height: 220px;
   overflow-y: auto;

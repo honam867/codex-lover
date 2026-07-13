@@ -776,12 +776,12 @@ function App() {
       {editProfile && (
         <div className="modal-overlay" onClick={() => setEditProfile(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-6">
-              <h2 className="text-neon text-lg font-bold">EDIT_ACCOUNT</h2>
-              <button onClick={() => setEditProfile(null)}><X size={20} /></button>
+            <div className="modal-header">
+              <h2 className="modal-title">EDIT_ACCOUNT</h2>
+              <button className="modal-close" onClick={() => setEditProfile(null)}><X size={20} /></button>
             </div>
-            <div className="space-y-5">
-              <div>
+            <div className="modal-form">
+              <div className="modal-field">
                 <div className="modal-label">NGÀY ADD</div>
                 <input
                   type="date"
@@ -794,7 +794,7 @@ function App() {
                   onChange={(e) => setEditDate(e.target.value)}
                 />
               </div>
-              <div>
+              <div className="modal-field">
                 <div className="modal-label">GIÁ TIỀN (VNĐ)</div>
                 <input
                   type="number"
@@ -803,9 +803,9 @@ function App() {
                   value={editPrice}
                   onChange={(e) => setEditPrice(Math.max(0, Number(e.target.value)))}
                 />
-                {editPrice > 0 && <div className="text-[11px] text-neon mt-2">{formatVND(editPrice)}</div>}
+                {editPrice > 0 && <div className="modal-hint">{formatVND(editPrice)}</div>}
               </div>
-              <button onClick={() => void saveEdit()} className="cyber-btn cyber-btn-solid w-full py-3">
+              <button onClick={() => void saveEdit()} className="cyber-btn cyber-btn-solid modal-btn-full">
                 LƯU
               </button>
             </div>
@@ -816,11 +816,11 @@ function App() {
       {pricePrompt && (
         <div className="modal-overlay" onClick={() => setPricePrompt(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-            <div className="flex justify-between items-center mb-4">
-              <h2 className="text-neon text-lg font-bold">GIÁ TÀI KHOẢN</h2>
-              <button onClick={() => setPricePrompt(null)}><X size={20} /></button>
+            <div className="modal-header">
+              <h2 className="modal-title">GIÁ TÀI KHOẢN</h2>
+              <button className="modal-close" onClick={() => setPricePrompt(null)}><X size={20} /></button>
             </div>
-            <div className="text-[11px] text-dim mb-3 truncate" title={pricePrompt.email}>
+            <div className="modal-sub" title={pricePrompt.email}>
               {pricePrompt.label || pricePrompt.email}
             </div>
             <input
@@ -832,10 +832,10 @@ function App() {
               value={promptPrice || ""}
               onChange={(e) => setPromptPrice(Math.max(0, Number(e.target.value)))}
             />
-            {promptPrice > 0 && <div className="text-[11px] text-neon mt-2">{formatVND(promptPrice)}</div>}
-            <div className="flex gap-3 mt-5">
-              <button onClick={() => setPricePrompt(null)} className="cyber-btn flex-1 py-3">SKIP</button>
-              <button onClick={() => void savePrice()} className="cyber-btn cyber-btn-solid flex-1 py-3">LƯU</button>
+            {promptPrice > 0 && <div className="modal-hint">{formatVND(promptPrice)}</div>}
+            <div className="modal-actions">
+              <button onClick={() => setPricePrompt(null)} className="cyber-btn modal-btn">SKIP</button>
+              <button onClick={() => void savePrice()} className="cyber-btn cyber-btn-solid modal-btn">LƯU</button>
             </div>
           </div>
         </div>
