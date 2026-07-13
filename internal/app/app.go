@@ -589,8 +589,12 @@ func printStatuses(statuses []model.ProfileStatus) {
 		fmt.Printf("  plan: %s\n", emptyDash(profileStatusPlan(item)))
 		fmt.Printf("  auth: %s\n", emptyDash(item.State.AuthStatus))
 		fmt.Printf("  freshness: %s\n", profileFreshness(item))
-		fmt.Printf("  5h: %s\n", formatWindowText(profileStatusPrimary(item), item.State.AuthStatus, now))
-		fmt.Printf("  weekly: %s\n", formatWindowText(profileStatusSecondary(item), item.State.AuthStatus, now))
+		if item.Profile.Tool == model.ToolCodex {
+			fmt.Printf("  weekly: %s\n", formatWindowText(profileStatusPrimary(item), item.State.AuthStatus, now))
+		} else {
+			fmt.Printf("  5h: %s\n", formatWindowText(profileStatusPrimary(item), item.State.AuthStatus, now))
+			fmt.Printf("  weekly: %s\n", formatWindowText(profileStatusSecondary(item), item.State.AuthStatus, now))
+		}
 		fmt.Printf("  credits: %s\n", service.FormatCredits(profileStatusCredits(item)))
 		if item.State.LastRefreshedAt != nil {
 			fmt.Printf("  refreshed: %s\n", item.State.LastRefreshedAt.Local().Format("2006-01-02 15:04:05"))

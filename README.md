@@ -9,7 +9,7 @@ It keeps your active and logged-out accounts visible in one desktop app, tracks 
 ## Why People Use It
 
 - See all known accounts in one place instead of losing track after logout.
-- Track 5H and weekly quota without manually checking each account.
+- Track weekly quota usage without manually checking each account.
 - Keep logged-out accounts visible with their last known usage and reset timing.
 - Switch back into cached accounts without repeating the whole login dance.
 - Keep OpenCode aligned with the active Codex account.
@@ -40,7 +40,7 @@ Heavy multi-account Codex usage usually turns into a repetitive loop:
 
 - A Wails + React desktop app as the primary UI.
 - One card grid for active and logged-out accounts.
-- Quota bars for 5H and weekly windows.
+- A weekly quota bar per Codex account.
 - Notifications when active Codex quota drops to 20% and 10%.
 - Auto-switch to another cached Codex account when the active one reaches the limit.
 - Automatic OpenCode sync from the active Codex account.

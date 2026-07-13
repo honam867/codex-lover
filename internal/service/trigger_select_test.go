@@ -125,7 +125,7 @@ func TestSelectTriggerTargetsTopNTieBreakAndClamp(t *testing.T) {
 		}
 	}
 	all := func(p model.Profile) (string, bool) { return p.ID, true }
-	// equal weekly (50) -> tie-break by primary (five-hour) desc: b(80) > c(40) > a(10)
+	// equal weekly-secondary (50) -> ordered by primary (weekly) remaining desc: b(80) > c(40) > a(10)
 	statuses := []model.ProfileStatus{mk("a", 50, 10), mk("b", 50, 80), mk("c", 50, 40)}
 	selected, _ := selectTriggerTargets(statuses, model.TriggerConfig{Mode: model.TriggerModeTopN, Count: 2}, all)
 	if len(selected) != 2 || selected[0].Status.Profile.ID != "b" || selected[1].Status.Profile.ID != "c" {

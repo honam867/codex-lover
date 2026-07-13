@@ -14,7 +14,7 @@ This desktop app should reuse the current Go backend and replace the current wat
 
 - viewing all accounts
 - seeing `ACTIVE` vs `LOGGED OUT`
-- seeing 5H and weekly quota cards
+- seeing the weekly quota card
 - adding accounts
 - logging into a chosen cached account
 - logging out and deleting account data
@@ -143,7 +143,6 @@ Reason for React here:
   - plan
   - auth state
   - freshness state
-  - 5H progress bar
   - weekly progress bar
   - credits
   - reset times
@@ -261,7 +260,6 @@ Prefer a dedicated DTO shape with:
 - plan
 - auth status
 - freshness status
-- 5H summary
 - weekly summary
 - credits
 - last error
