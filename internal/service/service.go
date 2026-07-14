@@ -1816,6 +1816,7 @@ func mergeCanonicalProfile(canonical model.Profile, duplicate model.Profile, now
 	canonical.HomePath = chooseNonEmpty(canonical.HomePath, duplicate.HomePath)
 	canonical.Enabled = canonical.Enabled || duplicate.Enabled
 	canonical.AutoDiscovered = canonical.AutoDiscovered || duplicate.AutoDiscovered
+	canonical.Blocked = canonical.Blocked || duplicate.Blocked
 
 	if strings.TrimSpace(strings.ToLower(canonical.Label)) == "default" {
 		if nextLabel := normalizeLegacyProfileLabel(duplicate); nextLabel != "" {
