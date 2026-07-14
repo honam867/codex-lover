@@ -33,6 +33,7 @@ type ProfileCard struct {
 	AuthStatus          string `json:"authStatus"`
 	Freshness           string `json:"freshness"`
 	IsActive            bool   `json:"isActive"`
+	Blocked             bool   `json:"blocked"`
 	PrimaryPercent      int    `json:"primaryPercent"`
 	PrimarySummary      string `json:"primarySummary"`
 	SecondaryPercent    int    `json:"secondaryPercent"`
@@ -178,6 +179,29 @@ func (a *App) ActivateProfile(profileID string) ActionResponse {
 		Message:  "Logged into " + profileLabel(result.Profile),
 		Snapshot: snapshot,
 	}
+}
+
+func (a *App) SetProfileBlocked(profileID string, blocked bool) ActionResponse {
+	if err := a.ensureReady(); err != nil {
+		return ActionResponse{Message: "Update failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+
+	a.mu.Lock()
+	result, err := a.svc.SetProfileBlocked(profileID, blocked)
+	a.mu.Unlock()
+	if err != nil {
+		return ActionResponse{Message: "Update failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+
+	snapshot, err := a.snapshot(result.Switched)
+	message := "Blocked " + profileLabel(result.Profile)
+	if !result.Blocked {
+		message = "Unblocked " + profileLabel(result.Profile)
+	}
+	if err != nil {
+		return ActionResponse{Message: message, Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+	return ActionResponse{Message: message, Snapshot: snapshot}
 }
 
 func (a *App) LogoutProfile(profileID string) ActionResponse {
@@ -403,6 +427,7 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			AuthStatus:          nonEmpty(status.State.AuthStatus, model.AuthStatusUnknown),
 			Freshness:           freshnessLabel(status),
 			IsActive:            status.State.AuthStatus == model.AuthStatusActive,
+			Blocked:             status.Profile.Blocked,
 			PrimaryPercent:      progressPercent(primary),
 			PrimarySummary:      service.FormatWindowSummary(primary),
 			SecondaryPercent:    progressPercent(secondary),
