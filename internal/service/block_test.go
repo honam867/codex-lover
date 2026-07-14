@@ -134,3 +134,91 @@ func TestActivateProfileRejectsBlocked(t *testing.T) {
 		t.Fatalf("ActivateProfile error = %v", err)
 	}
 }
+
+func TestSetProfileBlockedBlocksInactiveAccount(t *testing.T) {
+	svc, st, home := newBlockTestService(t)
+	active := blockTestStatus("active", home, model.AuthStatusActive, 40, false)
+	target := blockTestStatus("target", home, model.AuthStatusLoggedOut, 80, false)
+	saveBlockTestProfiles(t, st, []model.ProfileStatus{active, target})
+
+	result, err := svc.SetProfileBlocked(target.Profile.ID, true)
+	if err != nil {
+		t.Fatalf("SetProfileBlocked: %v", err)
+	}
+	if !result.Blocked || result.Switched || result.Profile.ID != target.Profile.ID {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if !loadBlockTestProfile(t, st, target.Profile.ID).Blocked {
+		t.Fatal("target block was not persisted")
+	}
+}
+
+func TestSetProfileBlockedUnblocksAccount(t *testing.T) {
+	svc, st, home := newBlockTestService(t)
+	target := blockTestStatus("target", home, model.AuthStatusLoggedOut, 80, true)
+	saveBlockTestProfiles(t, st, []model.ProfileStatus{target})
+
+	result, err := svc.SetProfileBlocked(target.Profile.ID, false)
+	if err != nil {
+		t.Fatalf("SetProfileBlocked: %v", err)
+	}
+	if result.Blocked || result.Switched {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if loadBlockTestProfile(t, st, target.Profile.ID).Blocked {
+		t.Fatal("target unblock was not persisted")
+	}
+}
+
+func TestSetProfileBlockedSwitchesBeforeBlockingActiveAccount(t *testing.T) {
+	svc, st, home := newBlockTestService(t)
+	active := blockTestStatus("active", home, model.AuthStatusActive, 0, false)
+	replacement := blockTestStatus("replacement", home, model.AuthStatusLoggedOut, 75, false)
+	saveBlockTestProfiles(t, st, []model.ProfileStatus{active, replacement})
+	writeBlockTestCache(t, st, replacement.Profile.ID, "replacement-auth")
+
+	result, err := svc.SetProfileBlocked(active.Profile.ID, true)
+	if err != nil {
+		t.Fatalf("SetProfileBlocked: %v", err)
+	}
+	if !result.Blocked || !result.Switched || result.To.ID != replacement.Profile.ID {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if !loadBlockTestProfile(t, st, active.Profile.ID).Blocked {
+		t.Fatal("active profile block was not persisted after switch")
+	}
+	data, err := os.ReadFile(filepath.Join(home, "auth.json"))
+	if err != nil {
+		t.Fatalf("ReadFile restored auth: %v", err)
+	}
+	if string(data) != "replacement-auth" {
+		t.Fatalf("restored auth = %q, want replacement-auth", data)
+	}
+}
+
+func TestSetProfileBlockedRefusesActiveAccountWithoutReplacement(t *testing.T) {
+	svc, st, home := newBlockTestService(t)
+	active := blockTestStatus("active", home, model.AuthStatusActive, 0, false)
+	saveBlockTestProfiles(t, st, []model.ProfileStatus{active})
+
+	result, err := svc.SetProfileBlocked(active.Profile.ID, true)
+	if err == nil || err.Error() != "cannot block the active account: no other usable account to switch to" {
+		t.Fatalf("SetProfileBlocked error = %v", err)
+	}
+	if result.Switched || loadBlockTestProfile(t, st, active.Profile.ID).Blocked {
+		t.Fatalf("refused block changed state: %+v", result)
+	}
+}
+
+func TestSetProfileBlockedRejectsNonCodexProfile(t *testing.T) {
+	svc, st, home := newBlockTestService(t)
+	claude := blockTestStatus("claude", home, model.AuthStatusLoggedOut, 80, false)
+	claude.Profile.Tool = model.ToolClaude
+	claude.Profile.Provider = model.ToolClaude
+	saveBlockTestProfiles(t, st, []model.ProfileStatus{claude})
+
+	_, err := svc.SetProfileBlocked(claude.Profile.ID, true)
+	if err == nil || !strings.Contains(err.Error(), "is not a Codex account") {
+		t.Fatalf("SetProfileBlocked error = %v", err)
+	}
+}
