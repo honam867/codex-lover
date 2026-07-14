@@ -88,16 +88,11 @@ func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.Refr
 		}
 	}
 
-	rotateResult, err := a.svc.AutoRotateCodex(statuses)
-	if err == nil && rotateResult.Changed {
-		statuses, err = a.svc.RefreshAllWithOptions(opts)
-		if err == nil {
-			a.usageSchedule.MarkUsageAttempted(opts, time.Now())
-		}
-	}
-	if err != nil {
-		return Snapshot{}, err
-	}
+	// NOTE: proactive "rotate to the highest-quota account" is intentionally NOT
+	// run here — it would immediately undo a manual switch (rotating back to the
+	// best-quota account on the next refresh). Auto-switch only reacts when the
+	// active account actually reaches its limit (AutoSwitchLimitedCodex above),
+	// so manual account choices are respected.
 
 	_ = a.syncOpenCodeLocked(statuses)
 
