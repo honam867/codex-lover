@@ -4,14 +4,16 @@ import claudeLogo from "./assets/provider-claude.svg";
 import kimiLogo from "./assets/provider-kimi.svg";
 import {
   Activity,
+  Ban,
+  Check,
+  Cpu,
+  LayoutDashboard,
   Plus,
   RefreshCw,
   Settings,
-  Trash2,
-  LayoutDashboard,
   ShieldCheck,
-  Cpu,
-  X
+  Trash2,
+  X,
 } from "lucide-react";
 import {
   ActivateProfile,
@@ -30,6 +32,7 @@ import {
   SaveTriggerSettings,
   SetAutoRotateCodex,
   SetAutoRotateThreshold,
+  SetProfileBlocked,
   TriggerNow,
   UpdateProfileMeta,
 } from "../wailsjs/go/main/App";
@@ -44,6 +47,7 @@ type ProfileCard = {
   authStatus: string;
   freshness: string;
   isActive: boolean;
+  blocked: boolean;
   primaryPercent: number;
   primarySummary: string;
   secondaryPercent: number;
@@ -307,6 +311,12 @@ function App() {
     applyAction(result);
   }
 
+  async function onSetBlocked(profileId: string, blocked: boolean) {
+    setBusyProfile(profileId);
+    const result = await SetProfileBlocked(profileId, blocked);
+    applyAction(result);
+  }
+
   async function onDelete(profileId: string, label: string) {
     if (!window.confirm(`CONFIRM WIPE FOR ${label.toUpperCase()}?`)) return;
     setBusyProfile(profileId);
@@ -428,7 +438,8 @@ function App() {
               className={clsx(
                 "account-card",
                 profile.provider.toLowerCase() === "codex" && "account-card-clickable",
-                profile.isActive && `active active-${profile.provider.toLowerCase()}`
+                profile.isActive && `active active-${profile.provider.toLowerCase()}`,
+                profile.provider.toLowerCase() === "codex" && profile.blocked && "account-card-blocked"
               )}
             >
               <div className="flex justify-between items-start mb-4">
@@ -516,11 +527,16 @@ function App() {
                 )}
 
               <div className="flex justify-between items-center mt-6 pt-4 border-t border-dashed border-[rgba(0,243,255,0.1)]">
-                <span className={clsx("text-[9px] px-2 py-0.5 rounded", badgeClass(profile.authStatus))}>
-                  {profile.authStatus.replace('_', ' ')}
-                </span>
+                <div className="flex items-center gap-2">
+                  <span className={clsx("text-[9px] px-2 py-0.5 rounded", badgeClass(profile.authStatus))}>
+                    {profile.authStatus.replace('_', ' ')}
+                  </span>
+                  {profile.provider.toLowerCase() === "codex" && profile.blocked && (
+                    <span className="blocked-badge">BLOCKED</span>
+                  )}
+                </div>
                 <div className="flex gap-2">
-                  {profile.canLoginFromCache && (
+                  {profile.canLoginFromCache && !profile.blocked && (
                     <button
                       onClick={(e) => { e.stopPropagation(); void onActivate(profile.id); }}
                       className="cyber-btn p-1.5"
@@ -528,6 +544,16 @@ function App() {
                       title="RE-AUTHENTICATE"
                     >
                       <ShieldCheck size={14} />
+                    </button>
+                  )}
+                  {profile.provider.toLowerCase() === "codex" && (
+                    <button
+                      onClick={(e) => { e.stopPropagation(); void onSetBlocked(profile.id, !profile.blocked); }}
+                      className={clsx("cyber-btn p-1.5", !profile.blocked && "cyber-btn-danger")}
+                      disabled={busyProfile === profile.id}
+                      title={profile.blocked ? "UNBLOCK ACCOUNT" : "BLOCK ACCOUNT"}
+                    >
+                      {profile.blocked ? <Check size={14} /> : <Ban size={14} />}
                     </button>
                   )}
                   <button
