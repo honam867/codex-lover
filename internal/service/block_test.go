@@ -3,6 +3,7 @@ package service
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -33,6 +34,14 @@ func writeBlockTestCache(t *testing.T, st *store.Store, profileID, contents stri
 	}
 	if err := os.WriteFile(filepath.Join(root, profileID+".json"), []byte(contents), 0o600); err != nil {
 		t.Fatalf("WriteFile cache: %v", err)
+	}
+}
+
+func writeBlockTestUnreadableCache(t *testing.T, st *store.Store, profileID string) {
+	t.Helper()
+	path := filepath.Join(st.Root(), "codex-auth", profileID+".json")
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		t.Fatalf("MkdirAll unreadable cache: %v", err)
 	}
 }
 
@@ -88,6 +97,15 @@ func loadBlockTestProfile(t *testing.T, st *store.Store, profileID string) model
 	return model.Profile{}
 }
 
+func loadBlockTestConfig(t *testing.T, st *store.Store) model.Config {
+	t.Helper()
+	cfg, err := st.LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	return cfg
+}
+
 func TestBestSwitchCandidateSkipsBlocked(t *testing.T) {
 	svc, st, home := newBlockTestService(t)
 	active := blockTestStatus("active", home, model.AuthStatusActive, 0, false)
@@ -126,11 +144,11 @@ func TestAutoRotateCodexSkipsBlocked(t *testing.T) {
 
 func TestActivateProfileRejectsBlocked(t *testing.T) {
 	svc, st, home := newBlockTestService(t)
-	blocked := blockTestStatus("blocked", home, model.AuthStatusLoggedOut, 80, true)
+	blocked := blockTestStatus("blocked", home, model.AuthStatusActive, 80, true)
 	saveBlockTestProfiles(t, st, []model.ProfileStatus{blocked})
 
 	_, err := svc.ActivateProfile(blocked.Profile.ID)
-	if err == nil || !strings.Contains(err.Error(), "account is blocked; unblock it first") {
+	if err == nil || err.Error() != "account is blocked; unblock it first" {
 		t.Fatalf("ActivateProfile error = %v", err)
 	}
 }
@@ -199,14 +217,42 @@ func TestSetProfileBlockedSwitchesBeforeBlockingActiveAccount(t *testing.T) {
 func TestSetProfileBlockedRefusesActiveAccountWithoutReplacement(t *testing.T) {
 	svc, st, home := newBlockTestService(t)
 	active := blockTestStatus("active", home, model.AuthStatusActive, 0, false)
+	active.Profile.Provider = ""
 	saveBlockTestProfiles(t, st, []model.ProfileStatus{active})
+	before := loadBlockTestConfig(t, st)
 
 	result, err := svc.SetProfileBlocked(active.Profile.ID, true)
 	if err == nil || err.Error() != "cannot block the active account: no other usable account to switch to" {
 		t.Fatalf("SetProfileBlocked error = %v", err)
 	}
+	if result.Switched {
+		t.Fatalf("refused block switched accounts: %+v", result)
+	}
+	after := loadBlockTestConfig(t, st)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("refused block changed config:\nbefore: %+v\nafter:  %+v", before, after)
+	}
+}
+
+func TestSetProfileBlockedRestoreFailureLeavesAccountUnblocked(t *testing.T) {
+	svc, st, home := newBlockTestService(t)
+	active := blockTestStatus("active", home, model.AuthStatusActive, 0, false)
+	active.Profile.Provider = ""
+	replacement := blockTestStatus("replacement", home, model.AuthStatusLoggedOut, 75, false)
+	saveBlockTestProfiles(t, st, []model.ProfileStatus{active, replacement})
+	writeBlockTestUnreadableCache(t, st, replacement.Profile.ID)
+	before := loadBlockTestConfig(t, st)
+
+	result, err := svc.SetProfileBlocked(active.Profile.ID, true)
+	if err == nil || !strings.Contains(err.Error(), "read cached Codex auth") {
+		t.Fatalf("SetProfileBlocked error = %v", err)
+	}
 	if result.Switched || loadBlockTestProfile(t, st, active.Profile.ID).Blocked {
-		t.Fatalf("refused block changed state: %+v", result)
+		t.Fatalf("failed restore changed block state: %+v", result)
+	}
+	after := loadBlockTestConfig(t, st)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("failed restore changed config:\nbefore: %+v\nafter:  %+v", before, after)
 	}
 }
 

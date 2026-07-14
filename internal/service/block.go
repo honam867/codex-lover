@@ -15,7 +15,7 @@ type BlockResult struct {
 }
 
 func (s *Service) SetProfileBlocked(profileID string, blocked bool) (BlockResult, error) {
-	statuses, err := s.ProfileStatuses()
+	statuses, err := s.store.ProfileStatuses()
 	if err != nil {
 		return BlockResult{}, err
 	}
