@@ -20,3 +20,30 @@ func TestMergeCanonicalProfilePreservesPrice(t *testing.T) {
 		t.Fatalf("expected canonical price 500000 preserved, got %d", got2.Price)
 	}
 }
+
+func TestMergeCanonicalProfilePreservesBlocked(t *testing.T) {
+	cases := []struct {
+		name      string
+		canonical bool
+		duplicate bool
+		want      bool
+	}{
+		{name: "neither blocked", want: false},
+		{name: "canonical blocked", canonical: true, want: true},
+		{name: "duplicate blocked", duplicate: true, want: true},
+		{name: "both blocked", canonical: true, duplicate: true, want: true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := mergeCanonicalProfile(
+				model.Profile{ID: "canonical", Blocked: tc.canonical},
+				model.Profile{ID: "duplicate", Blocked: tc.duplicate},
+				time.Now().UTC(),
+			)
+			if got.Blocked != tc.want {
+				t.Fatalf("Blocked = %v, want %v", got.Blocked, tc.want)
+			}
+		})
+	}
+}

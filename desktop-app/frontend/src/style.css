@@ -197,6 +197,27 @@ body::before {
 .account-card.active-kimi { border-color: var(--color-kimi); box-shadow: 0 0 15px rgba(188, 19, 254, 0.1); }
 .account-card.active-kimi::after { background: var(--color-kimi); box-shadow: 0 0 8px var(--color-kimi); }
 
+.account-card.account-card-blocked {
+  opacity: 0.58;
+  border-color: rgba(128, 128, 144, 0.45);
+  box-shadow: none;
+}
+
+.account-card.account-card-blocked:hover {
+  opacity: 0.72;
+  border-color: rgba(128, 128, 144, 0.7);
+  box-shadow: none;
+}
+
+.blocked-badge {
+  border: 1px solid rgba(255, 0, 85, 0.35);
+  border-radius: 4px;
+  background: rgba(255, 0, 85, 0.1);
+  color: var(--neon-pink);
+  padding: 2px 8px;
+  font-size: 9px;
+}
+
 .card-title {
   font-size: 14px;
   font-weight: 700;

@@ -679,6 +679,9 @@ func (s *Service) ActivateProfile(profileID string) (ActivateResult, error) {
 	if !found {
 		return ActivateResult{}, fmt.Errorf("profile %q not found", profileID)
 	}
+	if selected.Profile.Blocked {
+		return ActivateResult{}, fmt.Errorf("account is blocked; unblock it first")
+	}
 	if selected.State.AuthStatus == model.AuthStatusActive {
 		return ActivateResult{Profile: selected.Profile, Home: selected.Profile.HomePath}, nil
 	}
@@ -828,7 +831,7 @@ func (s *Service) AutoRotateCodex(statuses []model.ProfileStatus) (SwitchResult,
 	}
 	var candidates []model.ProfileStatus
 	for _, status := range statuses {
-		if status.Profile.Tool != model.ToolCodex {
+		if status.Profile.Tool != model.ToolCodex || status.Profile.Blocked {
 			continue
 		}
 		if !codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), status.Profile.ID) {
@@ -917,7 +920,7 @@ func (s *Service) bestSwitchCandidate(statuses []model.ProfileStatus, active mod
 	var bestScore float64
 	found := false
 	for _, status := range statuses {
-		if status.Profile.Tool != model.ToolCodex || status.Profile.ID == active.Profile.ID {
+		if status.Profile.Tool != model.ToolCodex || status.Profile.ID == active.Profile.ID || status.Profile.Blocked {
 			continue
 		}
 		if status.Profile.HomePath != active.Profile.HomePath {
@@ -1816,6 +1819,7 @@ func mergeCanonicalProfile(canonical model.Profile, duplicate model.Profile, now
 	canonical.HomePath = chooseNonEmpty(canonical.HomePath, duplicate.HomePath)
 	canonical.Enabled = canonical.Enabled || duplicate.Enabled
 	canonical.AutoDiscovered = canonical.AutoDiscovered || duplicate.AutoDiscovered
+	canonical.Blocked = canonical.Blocked || duplicate.Blocked
 
 	if strings.TrimSpace(strings.ToLower(canonical.Label)) == "default" {
 		if nextLabel := normalizeLegacyProfileLabel(duplicate); nextLabel != "" {
