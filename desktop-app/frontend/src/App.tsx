@@ -18,6 +18,7 @@ import {
 import {
   ActivateProfile,
   AddAccount,
+  CheckProfileHealth,
   GetConfig,
   GetDeletionHistory,
   GetInitialSnapshot,
@@ -43,6 +44,7 @@ type ProfileCard = {
   label: string;
   email: string;
   provider: string;
+  audience: string;
   plan: string;
   authStatus: string;
   freshness: string;
@@ -60,6 +62,12 @@ type ProfileCard = {
   lastTriggeredModel: string;
   price: number;
   createdAtISO: string;
+  healthStatus: string;
+  healthMessage: string;
+  healthCheckedAtText: string;
+  endAtText: string;
+  daysRemainingText: string;
+  daysUsedText: string;
 };
 
 type Snapshot = {
@@ -127,11 +135,15 @@ const DEFAULT_TRIGGER: TriggerConfig = {
   grace_minutes: 60,
 };
 
+type AudienceFilter = "all" | "personal" | "customer";
+
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>({ generatedAt: "", profiles: [] });
   const [busyProfile, setBusyProfile] = useState<string>("");
+  const [checkingHealth, setCheckingHealth] = useState<boolean>(false);
   const [statusText, setStatusText] = useState<string>("SYSTEM_READY");
   const [providerFilter, setProviderFilter] = useState<string>("all");
+  const [audienceFilter, setAudienceFilter] = useState<AudienceFilter>("all");
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [autoRotateEnabled, setAutoRotateEnabled] = useState<boolean>(false);
@@ -144,8 +156,10 @@ function App() {
   const [editProfile, setEditProfile] = useState<ProfileCard | null>(null);
   const [editDate, setEditDate] = useState<string>("");
   const [editPrice, setEditPrice] = useState<number>(0);
+  const [editAudience, setEditAudience] = useState<string>("personal");
   const [pricePrompt, setPricePrompt] = useState<ProfileCard | null>(null);
   const [promptPrice, setPromptPrice] = useState<number>(0);
+  const [promptAudience, setPromptAudience] = useState<string>("personal");
   const seenCodexIds = useRef<Set<string>>(new Set());
   const seededCodexIds = useRef<boolean>(false);
 
@@ -158,6 +172,7 @@ function App() {
       if (fresh.price === 0 && !pricePrompt) {
         setPricePrompt(fresh);
         setPromptPrice(0);
+        setPromptAudience(normalizeAudience(fresh.audience));
       }
     }
   }, [snapshot.profiles, pricePrompt]);
@@ -298,9 +313,26 @@ function App() {
     applyAction(result);
   }
 
+  async function checkHealth() {
+    if (checkingHealth) return;
+    const confirmed = window.confirm(
+      "Check trạng thái sẽ gửi request Codex tối giản bằng cached auth cho từng account Codex. " +
+        "Request này có thể refresh token và có thể mở/ảnh hưởng quota window. Tiếp tục?"
+    );
+    if (!confirmed) return;
+    setStatusText("CHECKING_ACCOUNT_STATUS...");
+    setCheckingHealth(true);
+    try {
+      const result = await CheckProfileHealth();
+      applyAction(result);
+    } finally {
+      setCheckingHealth(false);
+    }
+  }
+
   function applyAction(result: ActionResponse) {
     setSnapshot(result.snapshot);
-    setStatusText(result.error ? `ERROR: ${result.error}` : `CORE_LOADED: ${result.snapshot.generatedAt}`);
+    setStatusText(result.error ? `ERROR: ${result.error}` : result.message || `CORE_LOADED: ${result.snapshot.generatedAt}`);
     setBusyProfile("");
     setShowAddModal(false);
   }
@@ -333,18 +365,19 @@ function App() {
     setEditProfile(profile);
     setEditDate(profile.createdAtISO || "");
     setEditPrice(profile.price || 0);
+    setEditAudience(normalizeAudience(profile.audience));
   }
 
   async function saveEdit() {
     if (!editProfile) return;
-    const result = await UpdateProfileMeta(editProfile.id, editDate, editPrice);
+    const result = await UpdateProfileMeta(editProfile.id, editDate, editPrice, editAudience);
     setEditProfile(null);
     applyAction(result);
   }
 
   async function savePrice() {
     if (!pricePrompt) return;
-    const result = await UpdateProfileMeta(pricePrompt.id, pricePrompt.createdAtISO || "", promptPrice);
+    const result = await UpdateProfileMeta(pricePrompt.id, pricePrompt.createdAtISO || "", promptPrice, promptAudience);
     setPricePrompt(null);
     applyAction(result);
   }
@@ -354,9 +387,14 @@ function App() {
   }, [snapshot.profiles]);
 
   const sortedProfiles = useMemo(() => {
-    if (providerFilter === "all") return snapshot.profiles;
-    return snapshot.profiles.filter((p) => (p.provider || "unknown") === providerFilter);
-  }, [providerFilter, snapshot.profiles]);
+    return snapshot.profiles.filter((p) => {
+      if (providerFilter !== "all" && (p.provider || "unknown") !== providerFilter) return false;
+      if (audienceFilter !== "all" && p.provider.toLowerCase() === "codex") {
+        return normalizeAudience(p.audience) === audienceFilter;
+      }
+      return true;
+    });
+  }, [audienceFilter, providerFilter, snapshot.profiles]);
 
   const codexProfiles = useMemo(
     () => snapshot.profiles.filter((p) => p.provider.toLowerCase() === "codex"),
@@ -424,11 +462,36 @@ function App() {
             <button onClick={() => void refresh()} className="cyber-btn flex items-center gap-2">
               <RefreshCw size={14} /> Sync All
             </button>
+            <button
+              onClick={() => void checkHealth()}
+              className={clsx("cyber-btn flex items-center gap-2", checkingHealth && "cyber-btn-loading")}
+              disabled={checkingHealth}
+              title="Sends a minimal authenticated Codex probe for cached Codex accounts"
+            >
+              {checkingHealth ? <RefreshCw size={14} className="loading-spinner" /> : <ShieldCheck size={14} />}
+              {checkingHealth ? "Đang check..." : "Check trạng thái"}
+            </button>
             <button onClick={() => setShowAddModal(true)} className="cyber-btn cyber-btn-solid flex items-center gap-2">
               <Plus size={14} /> New Link
             </button>
           </div>
         </header>
+
+        <div className="audience-filter-bar">
+          {([
+            ["all", "Tất cả"],
+            ["personal", "Cá nhân"],
+            ["customer", "Khách hàng"],
+          ] as Array<[AudienceFilter, string]>).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setAudienceFilter(value)}
+              className={clsx("audience-filter-btn", audienceFilter === value && "active")}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         <div className="dashboard-grid">
           {sortedProfiles.map((profile) => (
@@ -438,7 +501,9 @@ function App() {
               className={clsx(
                 "account-card",
                 profile.provider.toLowerCase() === "codex" && "account-card-clickable",
+                profile.provider.toLowerCase() === "codex" && normalizeAudience(profile.audience) === "customer" && "account-card-customer",
                 profile.isActive && `active active-${profile.provider.toLowerCase()}`,
+                profile.provider.toLowerCase() === "codex" && isUnhealthy(profile.healthStatus) && "account-card-health-danger",
                 profile.provider.toLowerCase() === "codex" && profile.blocked && "account-card-blocked"
               )}
             >
@@ -452,6 +517,9 @@ function App() {
                     <img src={getProviderLogo(profile.provider)} className="provider-icon-mini" />
                     <span className="text-[9px]">{profile.provider.toUpperCase()}</span>
                   </div>
+                  {profile.provider.toLowerCase() === "codex" && normalizeAudience(profile.audience) === "customer" && (
+                    <span className="audience-badge-customer">KHÁCH</span>
+                  )}
                 </div>
               </div>
 
@@ -500,7 +568,7 @@ function App() {
               </div>
 
               {profile.provider.toLowerCase() === "codex" &&
-                (profile.price > 0 || profile.lastTriggeredAtText || profile.createdAtText) && (
+                (profile.price > 0 || profile.lastTriggeredAtText || profile.createdAtText || profile.endAtText || profile.healthMessage) && (
                   <div className="card-meta">
                     {profile.price > 0 && (
                       <div className="card-meta-row">
@@ -523,6 +591,27 @@ function App() {
                         <span>{profile.createdAtText}</span>
                       </div>
                     )}
+                    {profile.endAtText && (
+                      <div className="card-meta-row">
+                        <span className="text-dim">End</span>
+                        <span>{profile.endAtText}{profile.daysRemainingText ? ` (${profile.daysRemainingText})` : ""}</span>
+                      </div>
+                    )}
+                    {profile.daysUsedText && (
+                      <div className="card-meta-row">
+                        <span className="text-dim">Used</span>
+                        <span>{profile.daysUsedText}</span>
+                      </div>
+                    )}
+                    {profile.healthMessage && (
+                      <div className={clsx("card-meta-row", healthTextClass(profile.healthStatus))}>
+                        <span className="text-dim">Health</span>
+                        <span>
+                          {profile.healthMessage}
+                          {profile.healthCheckedAtText && profile.healthCheckedAtText !== "-" ? ` · ${profile.healthCheckedAtText}` : ""}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -533,6 +622,12 @@ function App() {
                   </span>
                   {profile.provider.toLowerCase() === "codex" && profile.blocked && (
                     <span className="blocked-badge">BLOCKED</span>
+                  )}
+                  {profile.provider.toLowerCase() === "codex" && isHealthy(profile.healthStatus) && (
+                    <span className="health-badge-ok">CHECK OK</span>
+                  )}
+                  {profile.provider.toLowerCase() === "codex" && isUnhealthy(profile.healthStatus) && (
+                    <span className="health-badge">CHECK FAILED</span>
                   )}
                 </div>
                 <div className="flex gap-2">
@@ -831,6 +926,31 @@ function App() {
                 />
                 {editPrice > 0 && <div className="modal-hint">{formatVND(editPrice)}</div>}
               </div>
+              <div className="modal-field">
+                <div className="modal-label">PHÂN LOẠI SỬ DỤNG</div>
+                <div className="audience-radio-group">
+                  <label className="audience-radio-row">
+                    <input
+                      type="radio"
+                      name="edit-audience"
+                      value="personal"
+                      checked={editAudience === "personal"}
+                      onChange={() => setEditAudience("personal")}
+                    />
+                    <span>Tài khoản sử dụng cho cá nhân</span>
+                  </label>
+                  <label className="audience-radio-row">
+                    <input
+                      type="radio"
+                      name="edit-audience"
+                      value="customer"
+                      checked={editAudience === "customer"}
+                      onChange={() => setEditAudience("customer")}
+                    />
+                    <span>Tài khoản sử dụng cho khách</span>
+                  </label>
+                </div>
+              </div>
               <button onClick={() => void saveEdit()} className="cyber-btn cyber-btn-solid modal-btn-full">
                 LƯU
               </button>
@@ -859,6 +979,31 @@ function App() {
               onChange={(e) => setPromptPrice(Math.max(0, Number(e.target.value)))}
             />
             {promptPrice > 0 && <div className="modal-hint">{formatVND(promptPrice)}</div>}
+            <div className="modal-field mt-4">
+              <div className="modal-label">PHÂN LOẠI SỬ DỤNG</div>
+              <div className="audience-radio-group">
+                <label className="audience-radio-row">
+                  <input
+                    type="radio"
+                    name="prompt-audience"
+                    value="personal"
+                    checked={promptAudience === "personal"}
+                    onChange={() => setPromptAudience("personal")}
+                  />
+                  <span>Tài khoản sử dụng cho cá nhân</span>
+                </label>
+                <label className="audience-radio-row">
+                  <input
+                    type="radio"
+                    name="prompt-audience"
+                    value="customer"
+                    checked={promptAudience === "customer"}
+                    onChange={() => setPromptAudience("customer")}
+                  />
+                  <span>Tài khoản sử dụng cho khách</span>
+                </label>
+              </div>
+            </div>
             <div className="modal-actions">
               <button onClick={() => setPricePrompt(null)} className="cyber-btn modal-btn">SKIP</button>
               <button onClick={() => void savePrice()} className="cyber-btn cyber-btn-solid modal-btn">LƯU</button>
@@ -921,5 +1066,20 @@ const meterTone = (percent: number) => {
   if (percent <= 40) return "warning";
   return "healthy";
 };
+
+const isUnhealthy = (status: string) => {
+  const normalized = status.toLowerCase();
+  return normalized === "failed" || normalized === "limited" || normalized === "no_auth";
+};
+
+const isHealthy = (status: string) => status.toLowerCase() === "ok";
+
+const healthTextClass = (status: string) => {
+  if (isHealthy(status)) return "card-meta-health-ok";
+  if (isUnhealthy(status)) return "card-meta-health-error";
+  return "";
+};
+
+const normalizeAudience = (value: string) => value.toLowerCase() === "customer" ? "customer" : "personal";
 
 export default App;

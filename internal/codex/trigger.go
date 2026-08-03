@@ -27,6 +27,30 @@ type TriggerResult struct {
 	Status    int
 }
 
+type TriggerError struct {
+	StatusCode int
+	Model      string
+	Message    string
+	Cause      error
+}
+
+func (e *TriggerError) Error() string {
+	if e == nil {
+		return "trigger error"
+	}
+	if e.Model != "" {
+		return fmt.Sprintf("%s for model %s", e.Message, e.Model)
+	}
+	return e.Message
+}
+
+func (e *TriggerError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
 // TriggerWindow sends one minimal request so the account's weekly quota window
 // opens. It tries models in order until one is accepted, and refreshes the
 // token once on 401. On refresh it returns a non-nil *AuthFile the caller must
@@ -45,7 +69,7 @@ func TriggerWindow(auth *ProfileAuth, models []string) (*TriggerResult, *AuthFil
 
 	refreshed, rerr := refreshAuth(auth)
 	if rerr != nil {
-		return nil, nil, fmt.Errorf("trigger unauthorized and refresh failed: %w", rerr)
+		return nil, nil, &TriggerError{StatusCode: http.StatusUnauthorized, Model: models[0], Message: "trigger unauthorized and refresh failed", Cause: rerr}
 	}
 	auth.AccessToken = refreshed.AccessToken
 	auth.RefreshToken = refreshed.RefreshToken
@@ -104,9 +128,9 @@ func doTriggerOnce(accessToken string, accountID string, models []string) (*Trig
 			return &TriggerResult{ModelUsed: modelName, Status: resp.StatusCode}, resp.StatusCode, nil
 		}
 		if resp.StatusCode == http.StatusUnauthorized {
-			return nil, resp.StatusCode, errors.New("trigger unauthorized")
+			return nil, resp.StatusCode, &TriggerError{StatusCode: resp.StatusCode, Model: modelName, Message: "trigger unauthorized"}
 		}
-		lastErr = fmt.Errorf("trigger failed with %d for model %s", resp.StatusCode, modelName)
+		lastErr = &TriggerError{StatusCode: resp.StatusCode, Model: modelName, Message: fmt.Sprintf("trigger failed with %d", resp.StatusCode)}
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no trigger model accepted")

@@ -45,6 +45,9 @@ Heavy multi-account Codex usage usually turns into a repetitive loop:
 - Auto-switch to another cached Codex account when the active one reaches the limit.
 - Automatic OpenCode sync from the active Codex account.
 - Add, activate, and delete accounts from the desktop app.
+- Manual Codex account health check for cached accounts.
+- Local Codex account labels for personal-use vs customer-use accounts.
+- Estimated Codex account `End` and `Used` day counters from the local `Added` date.
 - Local profile support for Codex, Claude, and Kimi.
 - Plain-text CLI commands for quick status checks and scripting.
 
@@ -200,6 +203,19 @@ Current behavior:
 - notify after a successful auto-switch
 - sync OpenCode to the active Codex account
 
+Manual actions:
+
+- `Sync All` refreshes the current desktop snapshot.
+- `Check trạng thái` sends a minimal Codex probe for each Codex account with cached auth.
+- Before probing, the app asks for confirmation because this is an authenticated network action, not a passive local check.
+- The probe can refresh and persist rotated cached tokens, and it can open or affect the account's Codex quota window.
+- Failed health checks are shown on the card, but the app does not auto-block or auto-remove the account.
+- Codex cards show an estimated `End` date from the local `Added` date plus one calendar month. Codex auth and usage payloads do not currently expose a real subscription expiry date.
+- Codex cards also show `Used`, the number of local calendar days from `Added` to today.
+- Clicking a Codex card opens local metadata editing: `Added`, purchase price, and account audience.
+- Account audience is Codex-only and local: `personal` is the default; `customer` renders as a high-contrast light card with a `KHÁCH` badge.
+- The dashboard audience filter defaults to `Tất cả` and can switch between `Cá nhân` and `Khách hàng`.
+
 ## Runtime Files
 
 Runtime data lives outside the repo:
@@ -212,6 +228,11 @@ Runtime data lives outside the repo:
 - `%USERPROFILE%\.codex-lover\homes\codex\`
 - `%USERPROFILE%\.codex-lover\homes\claude\`
 - `%USERPROFILE%\.codex-lover\homes\kimi\`
+
+Security note:
+
+- Cached auth files contain provider credentials. The app writes refreshed cached Codex auth with restrictive file mode where supported.
+- On Windows, file mode bits do not replace NTFS ACLs. Keep the Windows user profile private and do not share `%USERPROFILE%\.codex-lover` with other users.
 
 Do not commit auth files or print raw tokens.
 

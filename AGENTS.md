@@ -55,6 +55,11 @@ When the desktop app is open, it:
 8. notifies at 20% and 10% thresholds
 9. auto-switches to another cached account if the active account reaches limit
 10. syncs OpenCode to the active Codex account
+11. lets the user manually check Codex account health with a minimal authenticated probe
+12. stores local Codex metadata: added date, price, and account audience (`personal` or `customer`)
+13. shows estimated Codex `End` and `Used` day counters from the local added date
+14. visually distinguishes customer-use Codex accounts with a light card style and `KHÁCH` badge
+15. filters Codex cards by all/personal/customer audience in the desktop dashboard
 
 ## Important Product Limitation
 
@@ -262,10 +267,25 @@ If another agent needs to explain usage quickly, use this model:
 - `Add account` adds another Codex account without logging out the current one first
 - `Log in` on a card makes that cached account active
 - `Delete` removes cached auth and local account data for that account
+- `Check trạng thái` probes cached Codex accounts; it is an authenticated network action and asks for confirmation first
+- failed health checks mark cards visually but do not auto-block or remove accounts
+- click a Codex card to edit local metadata: added date, price, and personal/customer audience
+- customer-use Codex cards are intentionally styled differently from personal cards
+- the `Tất cả` / `Cá nhân` / `Khách hàng` filter controls Codex audience visibility in the dashboard
 - the app refreshes automatically
 - notifications fire at 20% and 10%
 - auto-switch happens when the active account reaches limit
 - OpenCode is kept aligned with the active Codex account
+
+## Current Desktop Card Metadata
+
+Codex card metadata is local app metadata, not Codex server truth:
+
+- `Added` is the local profile creation/edit date.
+- `End` is estimated as `Added + 1 calendar month`; Codex auth/usage payloads currently do not expose a real subscription expiry.
+- `Used` is the local calendar-day count from `Added` to today.
+- `Price` is integer VNĐ, stored locally on `model.Profile.Price`.
+- `Audience` is stored locally on `model.Profile.Audience`; empty/unknown is treated as `personal`.
 
 ## Runtime Files And Data
 
@@ -353,6 +373,19 @@ Relevant methods:
 - `SyncOpenCodeFromActiveCodex`
 - `ActivateProfile`
 - `LogoutProfile`
+- `CheckCodexProfileHealth`
+- `UpdateProfileMeta`
+
+### Change Codex card metadata or audience filtering
+
+Start here:
+
+- [types.go](internal\model\types.go): `Profile.Price`, `Profile.Audience`, health fields in `ProfileState`
+- [profile_meta.go](internal\service\profile_meta.go): local metadata update and audience normalization
+- [profile_health.go](internal\service\profile_health.go): manual Codex health probe and state stamping
+- [app.go](desktop-app\app.go): `ProfileCard`, `UpdateProfileMeta`, `CheckProfileHealth`, `End`/`Used` formatting
+- [App.tsx](desktop-app\frontend\src\App.tsx): edit modal, new-account price prompt, audience filter, health UI
+- [style.css](desktop-app\frontend\src\style.css): customer card theme, health colors, loading spinner
 
 ### Change add-account flow
 

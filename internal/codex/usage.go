@@ -236,7 +236,10 @@ func persistRefreshedTokensAtPath(authPath string, updated *AuthFile) error {
 	if err != nil {
 		return fmt.Errorf("marshal updated auth: %w", err)
 	}
-	return os.WriteFile(authPath, encoded, 0o644)
+	if err := os.WriteFile(authPath, encoded, 0o600); err != nil {
+		return err
+	}
+	return os.Chmod(authPath, 0o600)
 }
 
 func convertUsagePayload(payload *usagePayload) *model.UsageSnapshot {

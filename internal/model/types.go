@@ -20,6 +20,15 @@ const (
 	TriggerStatusSkippedNoAuth = "skipped_no_auth"
 	TriggerStatusNotEligible   = "not_eligible"
 	TriggerStatusError         = "error"
+
+	HealthStatusUnknown = "unknown"
+	HealthStatusOK      = "ok"
+	HealthStatusNoAuth  = "no_auth"
+	HealthStatusLimited = "limited"
+	HealthStatusFailed  = "failed"
+
+	ProfileAudiencePersonal = "personal"
+	ProfileAudienceCustomer = "customer"
 )
 
 type Config struct {
@@ -70,6 +79,7 @@ type Profile struct {
 	AccountID      string    `json:"account_id,omitempty"`
 	Plan           string    `json:"plan,omitempty"`
 	Price          int64     `json:"price,omitempty"` // purchase price in VNĐ (integer dong)
+	Audience       string    `json:"audience,omitempty"`
 	Blocked        bool      `json:"blocked,omitempty"`
 	Enabled        bool      `json:"enabled"`
 	AutoDiscovered bool      `json:"auto_discovered,omitempty"`
@@ -106,6 +116,10 @@ type ProfileState struct {
 	LastSeenLoggedOutAt *time.Time     `json:"last_seen_logged_out_at,omitempty"`
 	LastTriggeredAt     *time.Time     `json:"last_triggered_at,omitempty"`
 	LastTriggeredModel  string         `json:"last_triggered_model,omitempty"`
+	HealthStatus        string         `json:"health_status,omitempty"`
+	HealthMessage       string         `json:"health_message,omitempty"`
+	HealthCheckedAt     *time.Time     `json:"health_checked_at,omitempty"`
+	HealthCheckedModel  string         `json:"health_checked_model,omitempty"`
 }
 
 type UsageSnapshot struct {

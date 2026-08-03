@@ -2,6 +2,7 @@ package codex
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -67,6 +68,58 @@ func TestTriggerWindowAllModelsRejected(t *testing.T) {
 	}
 }
 
+func TestTriggerWindowAllModelsRejectedReturnsTriggerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	old := responsesURL
+	responsesURL = server.URL
+	defer func() { responsesURL = old }()
+
+	auth := &ProfileAuth{AccessToken: "tok", AccountID: "a"}
+	_, _, err := TriggerWindow(auth, []string{"m1"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	var triggerErr *TriggerError
+	if !errors.As(err, &triggerErr) {
+		t.Fatalf("expected TriggerError, got %T: %v", err, err)
+	}
+	if triggerErr.StatusCode != http.StatusForbidden {
+		t.Fatalf("StatusCode = %d, want %d", triggerErr.StatusCode, http.StatusForbidden)
+	}
+	if triggerErr.Model != "m1" {
+		t.Fatalf("Model = %q, want m1", triggerErr.Model)
+	}
+}
+
+func TestTriggerWindowUnauthorizedReturnsTriggerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	old := responsesURL
+	responsesURL = server.URL
+	defer func() { responsesURL = old }()
+
+	auth := &ProfileAuth{AccessToken: "tok", AccountID: "a"}
+	_, _, err := TriggerWindow(auth, []string{"m1"})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	var triggerErr *TriggerError
+	if !errors.As(err, &triggerErr) {
+		t.Fatalf("expected TriggerError, got %T: %v", err, err)
+	}
+	if triggerErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("StatusCode = %d, want %d", triggerErr.StatusCode, http.StatusUnauthorized)
+	}
+	if triggerErr.Model != "m1" {
+		t.Fatalf("Model = %q, want m1", triggerErr.Model)
+	}
+}
+
 func TestTriggerWindowRefreshOn401Succeeds(t *testing.T) {
 	respServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") == "Bearer old-token" {
@@ -98,6 +151,34 @@ func TestTriggerWindowRefreshOn401Succeeds(t *testing.T) {
 	}
 	if auth.AccessToken != "new-token" {
 		t.Fatalf("auth should be updated in place to new-token")
+	}
+}
+
+func TestTriggerWindowRefreshFailureReturnsTriggerError(t *testing.T) {
+	respServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	defer respServer.Close()
+	refreshServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer refreshServer.Close()
+
+	oldResp, oldRefresh := responsesURL, refreshTokenURL
+	responsesURL, refreshTokenURL = respServer.URL, refreshServer.URL
+	defer func() { responsesURL, refreshTokenURL = oldResp, oldRefresh }()
+
+	auth := &ProfileAuth{AccessToken: "old-token", RefreshToken: "old-refresh", AccountID: "a"}
+	_, _, err := TriggerWindow(auth, []string{"m1"})
+	if err == nil {
+		t.Fatalf("expected refresh failure")
+	}
+	var triggerErr *TriggerError
+	if !errors.As(err, &triggerErr) {
+		t.Fatalf("expected TriggerError, got %T: %v", err, err)
+	}
+	if triggerErr.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("StatusCode = %d, want %d", triggerErr.StatusCode, http.StatusUnauthorized)
 	}
 }
 

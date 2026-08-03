@@ -29,6 +29,7 @@ type ProfileCard struct {
 	Label               string `json:"label"`
 	Email               string `json:"email"`
 	Provider            string `json:"provider"`
+	Audience            string `json:"audience"`
 	Plan                string `json:"plan"`
 	AuthStatus          string `json:"authStatus"`
 	Freshness           string `json:"freshness"`
@@ -46,6 +47,12 @@ type ProfileCard struct {
 	LastTriggeredModel  string `json:"lastTriggeredModel"`
 	Price               int64  `json:"price"`
 	CreatedAtISO        string `json:"createdAtISO"`
+	HealthStatus        string `json:"healthStatus"`
+	HealthMessage       string `json:"healthMessage"`
+	HealthCheckedAtText string `json:"healthCheckedAtText"`
+	EndAtText           string `json:"endAtText"`
+	DaysRemainingText   string `json:"daysRemainingText"`
+	DaysUsedText        string `json:"daysUsedText"`
 }
 
 type ActionResponse struct {
@@ -151,6 +158,31 @@ func (a *App) RefreshSnapshot() ActionResponse {
 	}
 }
 
+func (a *App) CheckProfileHealth() ActionResponse {
+	if err := a.ensureReady(); err != nil {
+		return ActionResponse{Message: "Health check failed", Error: "Desktop service is not ready", Snapshot: a.mustSnapshotFallback()}
+	}
+
+	a.mu.Lock()
+	statuses, err := a.svc.RefreshAllWithOptions(service.RefreshOptions{SkipUsageForTools: map[string]bool{model.ToolCodex: true}})
+	checked := 0
+	if err == nil {
+		results, checkErr := a.svc.CheckCodexProfileHealth(statuses)
+		checked = len(results)
+		err = checkErr
+	}
+	a.mu.Unlock()
+	if err != nil {
+		return ActionResponse{Message: "Health check failed", Error: "Health check failed; refresh accounts and try again", Snapshot: a.mustSnapshotFallback()}
+	}
+
+	snapshot, err := a.snapshot(false)
+	if err != nil {
+		return ActionResponse{Message: fmt.Sprintf("Checked %d Codex account(s)", checked), Error: "Health check completed, but snapshot refresh failed", Snapshot: a.mustSnapshotFallback()}
+	}
+	return ActionResponse{Message: fmt.Sprintf("Checked %d Codex account(s)", checked), Snapshot: snapshot}
+}
+
 func (a *App) ActivateProfile(profileID string) ActionResponse {
 	if err := a.ensureReady(); err != nil {
 		return ActionResponse{
@@ -236,7 +268,7 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 	}
 }
 
-func (a *App) UpdateProfileMeta(profileID string, createdAtISO string, price int64) ActionResponse {
+func (a *App) UpdateProfileMeta(profileID string, createdAtISO string, price int64, audience string) ActionResponse {
 	if err := a.ensureReady(); err != nil {
 		return ActionResponse{Message: "Update failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
 	}
@@ -249,7 +281,7 @@ func (a *App) UpdateProfileMeta(profileID string, createdAtISO string, price int
 		createdAt = parsed.UTC()
 	}
 	a.mu.Lock()
-	_, err := a.svc.UpdateProfileMeta(profileID, createdAt, price)
+	_, err := a.svc.UpdateProfileMeta(profileID, createdAt, price, audience)
 	a.mu.Unlock()
 	if err != nil {
 		return ActionResponse{Message: "Update failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
@@ -418,11 +450,17 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 		if svc != nil && status.State.AuthStatus != model.AuthStatusActive {
 			canLoginFromCache = svc.HasCachedAuth(status.Profile.ID)
 		}
+		endAtText, daysRemainingText, daysUsedText := "", "", ""
+		if status.Profile.Tool == model.ToolCodex {
+			endAtText, daysRemainingText = codexAccountExpiryTexts(status.Profile.CreatedAt, now)
+			daysUsedText = codexAccountDaysUsedText(status.Profile.CreatedAt, now)
+		}
 		profiles = append(profiles, ProfileCard{
 			ID:                  status.Profile.ID,
 			Label:               profileLabel(status.Profile),
 			Email:               nonEmpty(status.Profile.Email, "-"),
 			Provider:            profileProvider(status.Profile),
+			Audience:            profileAudience(status.Profile),
 			Plan:                nonEmpty(status.Profile.Plan, "-"),
 			AuthStatus:          nonEmpty(status.State.AuthStatus, model.AuthStatusUnknown),
 			Freshness:           freshnessLabel(status),
@@ -440,6 +478,12 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			LastTriggeredModel:  status.State.LastTriggeredModel,
 			Price:               status.Profile.Price,
 			CreatedAtISO:        formatCreatedAtISO(status.Profile.CreatedAt),
+			HealthStatus:        nonEmpty(status.State.HealthStatus, model.HealthStatusUnknown),
+			HealthMessage:       status.State.HealthMessage,
+			HealthCheckedAtText: formatTimePointer(status.State.HealthCheckedAt),
+			EndAtText:           endAtText,
+			DaysRemainingText:   daysRemainingText,
+			DaysUsedText:        daysUsedText,
 		})
 	}
 	return Snapshot{
@@ -545,6 +589,15 @@ func profileProvider(profile model.Profile) string {
 	return model.ToolCodex
 }
 
+func profileAudience(profile model.Profile) string {
+	switch strings.ToLower(strings.TrimSpace(profile.Audience)) {
+	case model.ProfileAudienceCustomer:
+		return model.ProfileAudienceCustomer
+	default:
+		return model.ProfileAudiencePersonal
+	}
+}
+
 func providerDisplayName(provider string) string {
 	switch strings.ToLower(strings.TrimSpace(provider)) {
 	case model.ToolClaude:
@@ -586,6 +639,39 @@ func formatCreatedAtISO(value time.Time) string {
 		return ""
 	}
 	return value.Local().Format("2006-01-02")
+}
+
+const codexAccountDurationMonths = 1
+
+func codexAccountExpiryTexts(createdAt time.Time, now time.Time) (string, string) {
+	if createdAt.IsZero() {
+		return "", ""
+	}
+	endAt := createdAt.Local().AddDate(0, codexAccountDurationMonths, 0)
+	endDate := dateOnly(endAt)
+	nowDate := dateOnly(now.Local())
+	if !nowDate.Before(endDate) {
+		return endAt.Format("02/01/2006"), "đã hết hạn"
+	}
+	days := int(endDate.Sub(nowDate).Hours() / 24)
+	return endAt.Format("02/01/2006"), fmt.Sprintf("còn %d ngày", days)
+}
+
+func codexAccountDaysUsedText(createdAt time.Time, now time.Time) string {
+	if createdAt.IsZero() {
+		return ""
+	}
+	createdDate := dateOnly(createdAt.Local())
+	nowDate := dateOnly(now.Local())
+	if nowDate.Before(createdDate) {
+		return "đã dùng 0 ngày"
+	}
+	days := int(nowDate.Sub(createdDate).Hours() / 24)
+	return fmt.Sprintf("đã dùng %d ngày", days)
+}
+
+func dateOnly(value time.Time) time.Time {
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, value.Location())
 }
 
 func formatLastTriggeredAt(value *time.Time) string {
