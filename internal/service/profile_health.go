@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -16,13 +17,38 @@ type ProfileHealthResult struct {
 	ModelUsed string
 }
 
+func (s *Service) CheckCodexProfileHealthByID(statuses []model.ProfileStatus, profileID string) (ProfileHealthResult, error) {
+	profiles := statusesToProfiles(statuses)
+	result, ok := checkSingleCodexProfileHealthStatus(
+		statuses,
+		profileID,
+		s.cachedSourceFunc(profiles),
+		func(sourceProfileID string) (*codex.TriggerResult, error) {
+			return codex.TriggerHealthProbeFromCachedAuth(s.codexAuthCacheRoot(), sourceProfileID)
+		},
+	)
+	if !ok {
+		return ProfileHealthResult{}, fmt.Errorf("Codex profile %q not found", profileID)
+	}
+
+	state, err := s.store.LoadState()
+	if err != nil {
+		return result, err
+	}
+	state = applyProfileHealthStamps(state, []ProfileHealthResult{result}, time.Now().UTC())
+	if err := s.store.SaveState(state); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
 func (s *Service) CheckCodexProfileHealth(statuses []model.ProfileStatus) ([]ProfileHealthResult, error) {
 	profiles := statusesToProfiles(statuses)
 	results := checkCodexProfileHealthStatuses(
 		statuses,
 		s.cachedSourceFunc(profiles),
 		func(sourceProfileID string) (*codex.TriggerResult, error) {
-			return codex.TriggerFromCachedAuth(s.codexAuthCacheRoot(), sourceProfileID, codex.DefaultTriggerModels)
+			return codex.TriggerHealthProbeFromCachedAuth(s.codexAuthCacheRoot(), sourceProfileID)
 		},
 	)
 
@@ -66,6 +92,26 @@ func checkCodexProfileHealthStatuses(
 		results = append(results, health)
 	}
 	return results
+}
+
+func checkSingleCodexProfileHealthStatus(
+	statuses []model.ProfileStatus,
+	profileID string,
+	cachedSource func(model.Profile) (string, bool),
+	trigger func(sourceProfileID string) (*codex.TriggerResult, error),
+) (ProfileHealthResult, bool) {
+	for _, status := range statuses {
+		if status.Profile.ID != profileID || status.Profile.Tool != model.ToolCodex {
+			continue
+		}
+		sourceProfileID, ok := cachedSource(status.Profile)
+		if !ok {
+			return profileHealthNoAuth(status.Profile.ID), true
+		}
+		result, err := trigger(sourceProfileID)
+		return classifyProfileHealth(status.Profile.ID, result, err), true
+	}
+	return ProfileHealthResult{}, false
 }
 
 func classifyProfileHealth(profileID string, result *codex.TriggerResult, err error) ProfileHealthResult {

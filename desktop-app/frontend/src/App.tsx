@@ -18,7 +18,8 @@ import {
 import {
   ActivateProfile,
   AddAccount,
-  CheckProfileHealth,
+  AddShop,
+  CheckSingleProfileHealth,
   GetConfig,
   GetDeletionHistory,
   GetInitialSnapshot,
@@ -30,6 +31,7 @@ import {
   OpenCodexInstallPage,
   PreviewTriggerSelection,
   RefreshSnapshot,
+  RemoveShop,
   SaveTriggerSettings,
   SetAutoRotateCodex,
   SetAutoRotateThreshold,
@@ -61,6 +63,9 @@ type ProfileCard = {
   lastTriggeredAtText: string;
   lastTriggeredModel: string;
   price: number;
+  shopName: string;
+  customerName: string;
+  note: string;
   createdAtISO: string;
   healthStatus: string;
   healthMessage: string;
@@ -135,15 +140,53 @@ const DEFAULT_TRIGGER: TriggerConfig = {
   grace_minutes: 60,
 };
 
-type AudienceFilter = "all" | "personal" | "customer";
+type ViewMode = "card" | "list";
+type AudienceValue = "personal" | "customer";
+type HealthFilter = "ok" | "limited" | "failed" | "no_auth" | "unknown";
+type AudienceSort = "" | "customer_first" | "personal_first";
+type MonthSort = "" | "newest" | "oldest";
+type HealthSort = "" | "ok_first";
+type PriceSort = "" | "asc" | "desc";
+type FilterMenuKey = "audience" | "health" | "provider" | "shop";
+
+type FilterOption = {
+  value: string;
+  label: string;
+};
+
+const ZOOM_LEVELS = [0.85, 1, 1.15];
+
+const AUDIENCE_OPTIONS: Array<[AudienceValue, string]> = [
+  ["customer", "Khách hàng"],
+  ["personal", "Cá nhân"],
+];
+
+const HEALTH_OPTIONS: Array<[HealthFilter, string]> = [
+  ["ok", "Probe OK"],
+  ["limited", "Quota limited"],
+  ["failed", "Check failed"],
+  ["no_auth", "No auth"],
+];
 
 function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>({ generatedAt: "", profiles: [] });
   const [busyProfile, setBusyProfile] = useState<string>("");
-  const [checkingHealth, setCheckingHealth] = useState<boolean>(false);
+  const [healthPickMode, setHealthPickMode] = useState<boolean>(false);
+  const [checkingProfile, setCheckingProfile] = useState<string>("");
   const [statusText, setStatusText] = useState<string>("SYSTEM_READY");
   const [providerFilter, setProviderFilter] = useState<string>("all");
-  const [audienceFilter, setAudienceFilter] = useState<AudienceFilter>("all");
+  const [audienceFilters, setAudienceFilters] = useState<AudienceValue[]>([]);
+  const [healthFilters, setHealthFilters] = useState<HealthFilter[]>([]);
+  const [providerFilters, setProviderFilters] = useState<string[]>([]);
+  const [shopFilters, setShopFilters] = useState<string[]>([]);
+  const [openFilterMenu, setOpenFilterMenu] = useState<FilterMenuKey | "">("");
+  const [audienceSort, setAudienceSort] = useState<AudienceSort>("");
+  const [monthSort, setMonthSort] = useState<MonthSort>("");
+  const [healthSort, setHealthSort] = useState<HealthSort>("");
+  const [priceSort, setPriceSort] = useState<PriceSort>("");
+  const [viewMode, setViewMode] = useState<ViewMode>("card");
+  const [zoomIndex, setZoomIndex] = useState<number>(1);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [autoRotateEnabled, setAutoRotateEnabled] = useState<boolean>(false);
@@ -153,10 +196,18 @@ function App() {
   const [lastRun, setLastRun] = useState<TriggerRun | null>(null);
   const [topNPreview, setTopNPreview] = useState<string[]>([]);
   const [deletionHistory, setDeletionHistory] = useState<DeletedAccountRecord[]>([]);
+  const [showDeletionLog, setShowDeletionLog] = useState<boolean>(false);
+  const [shopCatalog, setShopCatalog] = useState<string[]>([]);
+  const [newShopName, setNewShopName] = useState<string>("");
+  const [showShopSuggestions, setShowShopSuggestions] = useState<boolean>(false);
   const [editProfile, setEditProfile] = useState<ProfileCard | null>(null);
   const [editDate, setEditDate] = useState<string>("");
   const [editPrice, setEditPrice] = useState<number>(0);
   const [editAudience, setEditAudience] = useState<string>("personal");
+  const [editShopName, setEditShopName] = useState<string>("");
+  const [editCustomerName, setEditCustomerName] = useState<string>("");
+  const [showEditShopSuggestions, setShowEditShopSuggestions] = useState<boolean>(false);
+  const [editNote, setEditNote] = useState<string>("");
   const [pricePrompt, setPricePrompt] = useState<ProfileCard | null>(null);
   const [promptPrice, setPromptPrice] = useState<number>(0);
   const [promptAudience, setPromptAudience] = useState<string>("personal");
@@ -194,6 +245,7 @@ function App() {
 
   useEffect(() => {
     if (!showSettingsModal) return;
+    setShowDeletionLog(false);
     void (async () => {
       try {
         const h = (await GetDeletionHistory()) as unknown as DeletedAccountRecord[];
@@ -247,8 +299,10 @@ function App() {
       const config = await GetConfig();
       const enabled = (config as any).auto_rotate_codex;
       const threshold = (config as any).auto_rotate_threshold;
+      const shops = (config as any).shops;
       if (typeof enabled === "boolean") setAutoRotateEnabled(enabled);
       if (typeof threshold === "number") setAutoRotateThreshold(threshold);
+      if (Array.isArray(shops)) setShopCatalog(shops.filter((shop) => typeof shop === "string"));
     } catch {}
   }
 
@@ -270,6 +324,22 @@ function App() {
     } catch {
       setStatusText("ERROR: SAVE FAILED");
     }
+  }
+
+  async function saveNewShop() {
+    const name = newShopName.trim();
+    if (!name) return;
+    const shops = await AddShop(name);
+    setShopCatalog(shops ?? []);
+    setNewShopName("");
+    setShowShopSuggestions(false);
+  }
+
+  async function deleteShop(name: string) {
+    const shops = await RemoveShop(name);
+    setShopCatalog(shops ?? []);
+    if (editShopName === name) setEditShopName("");
+    setShopFilters((current) => current.filter((shop) => !sameText(shop, name)));
   }
 
   async function onTriggerNow() {
@@ -314,19 +384,26 @@ function App() {
   }
 
   async function checkHealth() {
-    if (checkingHealth) return;
+    if (checkingProfile) return;
+    setHealthPickMode((enabled) => !enabled);
+    setStatusText(healthPickMode ? "SYSTEM_READY" : "SELECT_ACCOUNT_TO_CHECK");
+  }
+
+  async function checkSingleProfileHealth(profile: ProfileCard) {
+    if (!healthPickMode || checkingProfile || profile.provider.toLowerCase() !== "codex") return;
     const confirmed = window.confirm(
-      "Check trạng thái sẽ gửi request Codex tối giản bằng cached auth cho từng account Codex. " +
-        "Request này có thể refresh token và có thể mở/ảnh hưởng quota window. Tiếp tục?"
+      `Check trạng thái cho ${profile.label || profile.email}? ` +
+        "Request này sẽ dùng cached Codex auth, có thể refresh token và có thể ảnh hưởng quota window. Tiếp tục?"
     );
     if (!confirmed) return;
-    setStatusText("CHECKING_ACCOUNT_STATUS...");
-    setCheckingHealth(true);
+    setStatusText(`CHECKING ${profile.label || profile.email}...`);
+    setCheckingProfile(profile.id);
     try {
-      const result = await CheckProfileHealth();
+      const result = await CheckSingleProfileHealth(profile.id);
       applyAction(result);
+      setStatusText(result.error ? `ERROR: ${result.error}` : "SELECT_ACCOUNT_TO_CHECK");
     } finally {
-      setCheckingHealth(false);
+      setCheckingProfile("");
     }
   }
 
@@ -335,6 +412,14 @@ function App() {
     setStatusText(result.error ? `ERROR: ${result.error}` : result.message || `CORE_LOADED: ${result.snapshot.generatedAt}`);
     setBusyProfile("");
     setShowAddModal(false);
+  }
+
+  function handleProfileClick(profile: ProfileCard) {
+    if (healthPickMode) {
+      void checkSingleProfileHealth(profile);
+      return;
+    }
+    if (profile.provider.toLowerCase() === "codex") openEdit(profile);
   }
 
   async function onActivate(profileId: string) {
@@ -366,18 +451,27 @@ function App() {
     setEditDate(profile.createdAtISO || "");
     setEditPrice(profile.price || 0);
     setEditAudience(normalizeAudience(profile.audience));
+    setEditShopName(profile.shopName || "");
+    setEditCustomerName(profile.customerName || "");
+    setShowEditShopSuggestions(false);
+    setEditNote(profile.note || "");
   }
 
   async function saveEdit() {
     if (!editProfile) return;
-    const result = await UpdateProfileMeta(editProfile.id, editDate, editPrice, editAudience);
+    const shopName = editShopName.trim();
+    if (shopName && !shopCatalog.some((shop) => sameText(shop, shopName))) {
+      const shops = await AddShop(shopName);
+      setShopCatalog(shops ?? []);
+    }
+    const result = await UpdateProfileMeta(editProfile.id, editDate, editPrice, editAudience, shopName, editCustomerName, editNote);
     setEditProfile(null);
     applyAction(result);
   }
 
   async function savePrice() {
     if (!pricePrompt) return;
-    const result = await UpdateProfileMeta(pricePrompt.id, pricePrompt.createdAtISO || "", promptPrice, promptAudience);
+    const result = await UpdateProfileMeta(pricePrompt.id, pricePrompt.createdAtISO || "", promptPrice, promptAudience, pricePrompt.shopName || "", pricePrompt.customerName || "", pricePrompt.note || "");
     setPricePrompt(null);
     applyAction(result);
   }
@@ -386,39 +480,107 @@ function App() {
     return Array.from(new Set(snapshot.profiles.map((p) => p.provider || "unknown"))).sort();
   }, [snapshot.profiles]);
 
+  const shopOptions = useMemo(() => {
+    return uniqueText([
+      ...shopCatalog,
+      ...snapshot.profiles.map((profile) => profile.shopName || ""),
+    ]).sort((a, b) => a.localeCompare(b));
+  }, [shopCatalog, snapshot.profiles]);
+
   const sortedProfiles = useMemo(() => {
-    return snapshot.profiles.filter((p) => {
-      if (providerFilter !== "all" && (p.provider || "unknown") !== providerFilter) return false;
-      if (audienceFilter !== "all" && p.provider.toLowerCase() === "codex") {
-        return normalizeAudience(p.audience) === audienceFilter;
+    const filtered = snapshot.profiles.filter((profile) => {
+      const provider = profile.provider || "unknown";
+      if (providerFilter !== "all" && provider !== providerFilter) return false;
+      if (providerFilters.length > 0 && !providerFilters.includes(provider)) return false;
+      if (audienceFilters.length > 0 && profile.provider.toLowerCase() === "codex") {
+        if (!audienceFilters.includes(normalizeAudience(profile.audience))) return false;
+      }
+      if (healthFilters.length > 0 && profile.provider.toLowerCase() === "codex") {
+        if (!healthFilters.includes(normalizeHealth(profile.healthStatus))) return false;
+      }
+      if (shopFilters.length > 0) {
+        if (profile.provider.toLowerCase() !== "codex") return false;
+        if (!shopFilters.some((shop) => sameText(shop, profile.shopName))) return false;
       }
       return true;
     });
-  }, [audienceFilter, providerFilter, snapshot.profiles]);
+
+    if (!audienceSort && !monthSort && !healthSort && !priceSort) return filtered;
+    return [...filtered].sort((a, b) => compareProfiles(a, b, { audienceSort, monthSort, healthSort, priceSort }));
+  }, [audienceFilters, audienceSort, healthFilters, healthSort, monthSort, priceSort, providerFilter, providerFilters, shopFilters, snapshot.profiles]);
 
   const codexProfiles = useMemo(
     () => snapshot.profiles.filter((p) => p.provider.toLowerCase() === "codex"),
     [snapshot.profiles]
   );
 
+  const editShopOptions = useMemo(() => {
+    const current = editShopName.trim();
+    if (current && !shopCatalog.some((shop) => shop.toLowerCase() === current.toLowerCase())) {
+      return [...shopCatalog, current];
+    }
+    return shopCatalog;
+  }, [editShopName, shopCatalog]);
+
+  const shopSuggestions = useMemo(() => {
+    const q = newShopName.trim().toLowerCase();
+    if (!q) return shopCatalog;
+    return shopCatalog.filter((shop) => shop.toLowerCase().includes(q));
+  }, [newShopName, shopCatalog]);
+
+  const editShopSuggestions = useMemo(() => {
+    const q = editShopName.trim().toLowerCase();
+    if (!q) return editShopOptions;
+    return editShopOptions.filter((shop) => shop.toLowerCase().includes(q));
+  }, [editShopName, editShopOptions]);
+
+  const canCreateEditShop = Boolean(editShopName.trim()) && !shopCatalog.some((shop) => sameText(shop, editShopName));
+
   useEffect(() => {
     if (providerFilter !== "all" && !providerOptions.includes(providerFilter)) {
       setProviderFilter("all");
     }
+    setProviderFilters((current) => current.filter((provider) => providerOptions.includes(provider)));
   }, [providerFilter, providerOptions]);
 
+  useEffect(() => {
+    setShopFilters((current) => current.filter((shop) => shopOptions.some((option) => sameText(option, shop))));
+  }, [shopOptions]);
+
+  const zoomLevel = ZOOM_LEVELS[zoomIndex] ?? 1;
+  const hasActiveFilters = audienceFilters.length > 0 || healthFilters.length > 0 || providerFilters.length > 0 || shopFilters.length > 0;
+  const hasActiveSorts = Boolean(audienceSort || monthSort || healthSort || priceSort);
+  const toggleFilterMenu = (menu: FilterMenuKey) => setOpenFilterMenu((current) => current === menu ? "" : menu);
+  const clearAllFilterSort = () => {
+    setAudienceFilters([]);
+    setHealthFilters([]);
+    setProviderFilters([]);
+    setShopFilters([]);
+    setAudienceSort("");
+    setMonthSort("");
+    setHealthSort("");
+    setPriceSort("");
+  };
+
   return (
-    <div className="app-shell">
+    <div className={clsx("app-shell", sidebarCollapsed && "app-shell-sidebar-collapsed")} style={{ "--dashboard-zoom": zoomLevel } as any}>
       <aside className="sidebar">
         <div className="sidebar-logo">
           <Cpu size={24} className="text-neon" />
           <h1>CODEX // CORE</h1>
+          <button
+            onClick={() => setSidebarCollapsed((value) => !value)}
+            className="sidebar-toggle"
+            title={sidebarCollapsed ? "Open sidebar" : "Close sidebar"}
+          >
+            {sidebarCollapsed ? ">" : "<"}
+          </button>
         </div>
 
         <nav className="nav-group">
           <span className="nav-label">Modules</span>
           <button 
-            onClick={() => setProviderFilter('all')}
+            onClick={() => { setProviderFilter('all'); setProviderFilters([]); }}
             className={clsx("cyber-btn w-full flex items-center gap-2 mb-2", providerFilter === 'all' && 'cyber-btn-solid')}
           >
             <LayoutDashboard size={14} /> Main Dashboard
@@ -431,7 +593,7 @@ function App() {
             {['all', ...providerOptions].map(p => (
               <button
                 key={p}
-                onClick={() => setProviderFilter(p)}
+                onClick={() => { setProviderFilter(p); setProviderFilters([]); }}
                 className={clsx(
                   "cyber-btn w-full flex items-center justify-between text-[10px]",
                   providerFilter === p && "cyber-btn-solid"
@@ -453,23 +615,18 @@ function App() {
 
       <main className="main-content">
         <header className="top-nav">
-          <div className="status-bar">
-            <div className="status-dot" />
-            <span>{statusText}</span>
-          </div>
-
-          <div className="flex gap-4">
+          <div className="top-actions">
             <button onClick={() => void refresh()} className="cyber-btn flex items-center gap-2">
               <RefreshCw size={14} /> Sync All
             </button>
             <button
               onClick={() => void checkHealth()}
-              className={clsx("cyber-btn flex items-center gap-2", checkingHealth && "cyber-btn-loading")}
-              disabled={checkingHealth}
-              title="Sends a minimal authenticated Codex probe for cached Codex accounts"
+              className={clsx("cyber-btn flex items-center gap-2", healthPickMode && "cyber-btn-solid", checkingProfile && "cyber-btn-loading")}
+              disabled={Boolean(checkingProfile)}
+              title="Bật chế độ chọn account Codex trên trang để check riêng từng account"
             >
-              {checkingHealth ? <RefreshCw size={14} className="loading-spinner" /> : <ShieldCheck size={14} />}
-              {checkingHealth ? "Đang check..." : "Check trạng thái"}
+              {checkingProfile ? <RefreshCw size={14} className="loading-spinner" /> : <ShieldCheck size={14} />}
+              {checkingProfile ? "Đang check..." : healthPickMode ? "Chọn tài khoản" : "Check trạng thái"}
             </button>
             <button onClick={() => setShowAddModal(true)} className="cyber-btn cyber-btn-solid flex items-center gap-2">
               <Plus size={14} /> New Link
@@ -477,58 +634,152 @@ function App() {
           </div>
         </header>
 
-        <div className="audience-filter-bar">
-          {([
-            ["all", "Tất cả"],
-            ["personal", "Cá nhân"],
-            ["customer", "Khách hàng"],
-          ] as Array<[AudienceFilter, string]>).map(([value, label]) => (
-            <button
-              key={value}
-              onClick={() => setAudienceFilter(value)}
-              className={clsx("audience-filter-btn", audienceFilter === value && "active")}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="dashboard-toolbar">
+          <div className="toolbar-primary-row">
+            <div className="toolbar-left">
+              <div className="status-bar">
+                <div className="status-dot" />
+                <span>{statusText}</span>
+              </div>
+              <div className="view-switcher">
+                <span className="control-label">VIEW</span>
+                <button onClick={() => setViewMode("card")} className={clsx("control-chip", viewMode === "card" && "active")}>CARD</button>
+                <button onClick={() => setViewMode("list")} className={clsx("control-chip", viewMode === "list" && "active")}>LIST</button>
+              </div>
+              <div className="view-switcher">
+                <span className="control-label">ZOOM</span>
+                <button onClick={() => setZoomIndex((value) => Math.max(0, value - 1))} className="control-chip" disabled={zoomIndex === 0}>-</button>
+                <span className="zoom-readout">{Math.round(zoomLevel * 100)}%</span>
+                <button onClick={() => setZoomIndex((value) => Math.min(ZOOM_LEVELS.length - 1, value + 1))} className="control-chip" disabled={zoomIndex === ZOOM_LEVELS.length - 1}>+</button>
+              </div>
+            </div>
+            <div className="toolbar-right">
+              <div className="filter-sort-row">
+                <span className="filter-sort-label">FILTER</span>
+                <MultiFilterMenu
+                  label="Audience"
+                  options={AUDIENCE_OPTIONS.map(([value, label]) => ({ value, label }))}
+                  selected={audienceFilters}
+                  open={openFilterMenu === "audience"}
+                  onToggleOpen={() => toggleFilterMenu("audience")}
+                  onToggle={(value) => setAudienceFilters((current) => toggleFilterValue(current, value as AudienceValue))}
+                />
+                <MultiFilterMenu
+                  label="Health"
+                  options={HEALTH_OPTIONS.map(([value, label]) => ({ value, label }))}
+                  selected={healthFilters}
+                  open={openFilterMenu === "health"}
+                  onToggleOpen={() => toggleFilterMenu("health")}
+                  onToggle={(value) => setHealthFilters((current) => toggleFilterValue(current, value as HealthFilter))}
+                />
+                <MultiFilterMenu
+                  label="Provider"
+                  options={providerOptions.map((provider) => ({ value: provider, label: provider.toUpperCase() }))}
+                  selected={providerFilters}
+                  open={openFilterMenu === "provider"}
+                  onToggleOpen={() => toggleFilterMenu("provider")}
+                  onToggle={(value) => setProviderFilters((current) => toggleFilterValue(current, value))}
+                />
+                <MultiFilterMenu
+                  label="Shop"
+                  options={shopOptions.map((shop) => ({ value: shop, label: shop }))}
+                  selected={shopFilters}
+                  open={openFilterMenu === "shop"}
+                  onToggleOpen={() => toggleFilterMenu("shop")}
+                  onToggle={(value) => setShopFilters((current) => toggleFilterValue(current, value))}
+                  emptyLabel="Chưa có shop"
+                />
+              </div>
+              <div className="filter-sort-row">
+                <span className="filter-sort-label">SORT</span>
+                <select className="filter-select" value={audienceSort} onChange={(event) => setAudienceSort(event.target.value as AudienceSort)}>
+                  <option value="">Audience</option>
+                  <option value="customer_first">Khách hàng trước</option>
+                  <option value="personal_first">Cá nhân trước</option>
+                </select>
+                <select className="filter-select" value={monthSort} onChange={(event) => setMonthSort(event.target.value as MonthSort)}>
+                  <option value="">Month</option>
+                  <option value="newest">Tháng mới trước</option>
+                  <option value="oldest">Tháng cũ trước</option>
+                </select>
+                <select className="filter-select" value={healthSort} onChange={(event) => setHealthSort(event.target.value as HealthSort)}>
+                  <option value="">Quota</option>
+                  <option value="ok_first">Probe OK trước</option>
+                </select>
+                <select className="filter-select" value={priceSort} onChange={(event) => setPriceSort(event.target.value as PriceSort)}>
+                  <option value="">Price</option>
+                  <option value="asc">Giá thấp - cao</option>
+                  <option value="desc">Giá cao - thấp</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          {(hasActiveFilters || hasActiveSorts) && (
+            <div className="active-filter-tags">
+              {audienceFilters.map((value) => (
+                <button key={`audience-${value}`} className="filter-tag" onClick={() => setAudienceFilters((current) => current.filter((item) => item !== value))}>
+                  Audience: {audienceLabel(value)} <X size={10} />
+                </button>
+              ))}
+              {healthFilters.map((value) => (
+                <button key={`health-${value}`} className="filter-tag" onClick={() => setHealthFilters((current) => current.filter((item) => item !== value))}>
+                  Health: {healthLabel(value)} <X size={10} />
+                </button>
+              ))}
+              {providerFilters.map((value) => (
+                <button key={`provider-${value}`} className="filter-tag" onClick={() => setProviderFilters((current) => current.filter((item) => item !== value))}>
+                  Provider: {value.toUpperCase()} <X size={10} />
+                </button>
+              ))}
+              {shopFilters.map((value) => (
+                <button key={`shop-${value}`} className="filter-tag" onClick={() => setShopFilters((current) => current.filter((item) => !sameText(item, value)))}>
+                  Shop: {value} <X size={10} />
+                </button>
+              ))}
+              {audienceSort && <button className="filter-tag filter-tag-sort" onClick={() => setAudienceSort("")}>Sort: {audienceSortLabel(audienceSort)} <X size={10} /></button>}
+              {monthSort && <button className="filter-tag filter-tag-sort" onClick={() => setMonthSort("")}>Sort: {monthSortLabel(monthSort)} <X size={10} /></button>}
+              {healthSort && <button className="filter-tag filter-tag-sort" onClick={() => setHealthSort("")}>Sort: Probe OK trước <X size={10} /></button>}
+              {priceSort && <button className="filter-tag filter-tag-sort" onClick={() => setPriceSort("")}>Sort: {priceSortLabel(priceSort)} <X size={10} /></button>}
+              <button className="filter-tag-clear" onClick={clearAllFilterSort}>Clear all</button>
+            </div>
+          )}
+          {healthPickMode && (
+            <div className="health-pick-hint">
+              Click một Codex card đang hiển thị để check riêng account đó. Bấm lại Chọn tài khoản để thoát.
+            </div>
+          )}
         </div>
 
-        <div className="dashboard-grid">
+        <div className={clsx("dashboard-grid", viewMode === "list" && "dashboard-list")}>
           {sortedProfiles.map((profile) => (
             <article
               key={profile.id}
-              onClick={() => { if (profile.provider.toLowerCase() === "codex") openEdit(profile); }}
+              onClick={() => handleProfileClick(profile)}
               className={clsx(
                 "account-card",
                 profile.provider.toLowerCase() === "codex" && "account-card-clickable",
+                healthPickMode && profile.provider.toLowerCase() === "codex" && "account-card-health-selectable",
+                checkingProfile === profile.id && "account-card-health-checking",
                 profile.provider.toLowerCase() === "codex" && normalizeAudience(profile.audience) === "customer" && "account-card-customer",
                 profile.isActive && `active active-${profile.provider.toLowerCase()}`,
                 profile.provider.toLowerCase() === "codex" && isUnhealthy(profile.healthStatus) && "account-card-health-danger",
                 profile.provider.toLowerCase() === "codex" && profile.blocked && "account-card-blocked"
               )}
             >
-              <div className="flex justify-between items-start mb-4">
+              <img src={getProviderLogo(profile.provider)} className="provider-corner-logo" alt="" aria-hidden="true" />
+              <div className="card-head flex justify-between items-start mb-4">
                 <div className="min-w-0 flex-1">
                   <h3 className="card-title truncate" title={profile.label}>{profile.label.toUpperCase()}</h3>
                   <p className="card-email truncate" title={profile.email}>{profile.email}</p>
                 </div>
-                <div className="flex flex-col items-end gap-2">
-                  <div className="provider-badge">
-                    <img src={getProviderLogo(profile.provider)} className="provider-icon-mini" />
-                    <span className="text-[9px]">{profile.provider.toUpperCase()}</span>
-                  </div>
-                  {profile.provider.toLowerCase() === "codex" && normalizeAudience(profile.audience) === "customer" && (
-                    <span className="audience-badge-customer">KHÁCH</span>
-                  )}
-                </div>
               </div>
 
-              <div className="space-y-5">
+              <div className="card-usage space-y-5">
                 {profile.provider.toLowerCase() === "codex" ? (
                   <div className="meter-block">
                     <div className="meter-label">
                       <span>Quota: WEEKLY</span>
-                      <span className="text-neon">{profile.primarySummary}</span>
+                      <span className="text-neon">{renderQuotaSummary(profile.primarySummary)}</span>
                     </div>
                     <div className="meter-track">
                       <div
@@ -542,7 +793,7 @@ function App() {
                     <div className="meter-block">
                       <div className="meter-label">
                         <span>Quota: 5H</span>
-                        <span className="text-neon">{profile.primarySummary}</span>
+                        <span className="text-neon">{renderQuotaSummary(profile.primarySummary)}</span>
                       </div>
                       <div className="meter-track">
                         <div
@@ -554,7 +805,7 @@ function App() {
                     <div className="meter-block">
                       <div className="meter-label">
                         <span>Quota: WEEKLY</span>
-                        <span className="text-neon">{profile.secondarySummary}</span>
+                        <span className="text-neon">{renderQuotaSummary(profile.secondarySummary)}</span>
                       </div>
                       <div className="meter-track">
                         <div
@@ -568,7 +819,7 @@ function App() {
               </div>
 
               {profile.provider.toLowerCase() === "codex" &&
-                (profile.price > 0 || profile.lastTriggeredAtText || profile.createdAtText || profile.endAtText || profile.healthMessage) && (
+                (profile.price > 0 || profile.shopName || profile.customerName || profile.createdAtText || profile.endAtText || profile.healthMessage) && (
                   <div className="card-meta">
                     {profile.price > 0 && (
                       <div className="card-meta-row">
@@ -576,13 +827,16 @@ function App() {
                         <span>{formatVND(profile.price)}</span>
                       </div>
                     )}
-                    {profile.lastTriggeredAtText && (
+                    {profile.shopName && (
                       <div className="card-meta-row">
-                        <span className="text-dim">Trigger</span>
-                        <span>
-                          {profile.lastTriggeredAtText}
-                          {profile.lastTriggeredModel ? ` · ${profile.lastTriggeredModel}` : ""}
-                        </span>
+                        <span className="text-dim">Tên shop</span>
+                        <span>{profile.shopName}</span>
+                      </div>
+                    )}
+                    {profile.customerName && (
+                      <div className="card-meta-row">
+                        <span className="text-dim">Tên khách</span>
+                        <strong className="card-customer-name">{profile.customerName}</strong>
                       </div>
                     )}
                     {profile.createdAtText && (
@@ -594,20 +848,25 @@ function App() {
                     {profile.endAtText && (
                       <div className="card-meta-row">
                         <span className="text-dim">End</span>
-                        <span>{profile.endAtText}{profile.daysRemainingText ? ` (${profile.daysRemainingText})` : ""}</span>
+                        <span>
+                          {profile.endAtText}
+                          {profile.daysRemainingText && (
+                            <strong className="card-day-count"> ({profile.daysRemainingText})</strong>
+                          )}
+                        </span>
                       </div>
                     )}
                     {profile.daysUsedText && (
                       <div className="card-meta-row">
                         <span className="text-dim">Used</span>
-                        <span>{profile.daysUsedText}</span>
+                        <strong className="card-day-count">{profile.daysUsedText}</strong>
                       </div>
                     )}
                     {profile.healthMessage && (
                       <div className={clsx("card-meta-row", healthTextClass(profile.healthStatus))}>
                         <span className="text-dim">Health</span>
                         <span>
-                          {profile.healthMessage}
+                          {formatHealthMessage(profile.healthMessage)}
                           {profile.healthCheckedAtText && profile.healthCheckedAtText !== "-" ? ` · ${profile.healthCheckedAtText}` : ""}
                         </span>
                       </div>
@@ -615,8 +874,8 @@ function App() {
                   </div>
                 )}
 
-              <div className="flex justify-between items-center mt-6 pt-4 border-t border-dashed border-[rgba(0,243,255,0.1)]">
-                <div className="flex items-center gap-2">
+              <div className="card-actions">
+                <div className="card-badges">
                   <span className={clsx("text-[9px] px-2 py-0.5 rounded", badgeClass(profile.authStatus))}>
                     {profile.authStatus.replace('_', ' ')}
                   </span>
@@ -630,7 +889,7 @@ function App() {
                     <span className="health-badge">CHECK FAILED</span>
                   )}
                 </div>
-                <div className="flex gap-2">
+                <div className="card-action-buttons">
                   {profile.canLoginFromCache && !profile.blocked && (
                     <button
                       onClick={(e) => { e.stopPropagation(); void onActivate(profile.id); }}
@@ -694,12 +953,12 @@ function App() {
 
       {showSettingsModal && (
         <div className="modal-overlay" onClick={() => setShowSettingsModal(false)}>
-          <div className="modal-content" onClick={e => e.stopPropagation()}>
-             <div className="flex justify-between items-center mb-6">
+          <div className="modal-content settings-modal" onClick={e => e.stopPropagation()}>
+            <button className="modal-close settings-modal-close" onClick={() => setShowSettingsModal(false)}><X size={18} /></button>
+             <div className="settings-modal-header">
               <h2 className="text-neon text-lg font-bold">CORE_CONFIGURATION</h2>
-              <button onClick={() => setShowSettingsModal(false)}><X size={20} /></button>
             </div>
-            <div className="space-y-8">
+            <div className="settings-modal-body">
               <div className="flex justify-between items-center bg-[rgba(0,243,255,0.05)] p-4 border border-[rgba(0,243,255,0.1)]">
                 <div>
                   <div className="font-bold text-sm">AUTO_ROTATION_PROTOCOL</div>
@@ -749,6 +1008,43 @@ function App() {
                   <span>1%</span>
                   <span>10%</span>
                   <span>20%</span>
+                </div>
+              </div>
+
+              <div className="bg-[rgba(0,243,255,0.05)] p-4 border border-[rgba(0,243,255,0.1)] space-y-4">
+                <div>
+                  <div className="font-bold text-sm">DANH MỤC SHOP</div>
+                </div>
+                <div className="shop-catalog-add">
+                  <div className="shop-combobox">
+                    <input
+                      className="modal-input"
+                      value={newShopName}
+                      placeholder="Tên shop"
+                      onFocus={() => setShowShopSuggestions(true)}
+                      onBlur={() => window.setTimeout(() => setShowShopSuggestions(false), 120)}
+                      onChange={(e) => { setNewShopName(e.target.value); setShowShopSuggestions(true); }}
+                      onKeyDown={(e) => { if (e.key === "Enter") void saveNewShop(); }}
+                    />
+                    {showShopSuggestions && (
+                      <div className="shop-suggestion-list">
+                        {shopSuggestions.length === 0 && <div className="shop-suggestion-empty">Không có shop khớp</div>}
+                        {shopSuggestions.map((shop) => (
+                          <button
+                            key={shop}
+                            type="button"
+                            className="shop-suggestion-item"
+                            onMouseDown={(e) => e.preventDefault()}
+                            onClick={() => { setNewShopName(shop); setShowShopSuggestions(false); }}
+                          >
+                            <span>{shop}</span>
+                            <X size={11} onClick={(e) => { e.stopPropagation(); void deleteShop(shop); }} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <button className="cyber-btn cyber-btn-solid" onClick={() => void saveNewShop()}>THÊM</button>
                 </div>
               </div>
 
@@ -871,22 +1167,27 @@ function App() {
               </div>
 
               <div className="bg-[rgba(0,243,255,0.05)] p-4 border border-[rgba(0,243,255,0.1)]">
-                <div className="font-bold text-sm mb-3">DELETION_LOG</div>
-                {deletionHistory.length === 0 ? (
-                  <div className="text-[10px] text-dim">No deletions yet.</div>
-                ) : (
-                  <div className="deletion-log">
-                    {deletionHistory.map((d, i) => (
-                      <div key={`${d.profile_id}-${i}`} className="deletion-log-row">
-                        <span className="deletion-log-name" title={d.email || d.label}>
-                          {d.label || d.email || d.profile_id}
-                        </span>
-                        <span className="deletion-log-meta">
-                          {(d.provider || "").toUpperCase()} · {new Date(d.deleted_at).toLocaleString()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
+                <button className="settings-collapse-toggle" onClick={() => setShowDeletionLog((value) => !value)}>
+                  <span>DELETION_LOG</span>
+                  <span>{deletionHistory.length} item(s) {showDeletionLog ? "▲" : "▼"}</span>
+                </button>
+                {showDeletionLog && (
+                  deletionHistory.length === 0 ? (
+                    <div className="text-[10px] text-dim mt-3">No deletions yet.</div>
+                  ) : (
+                    <div className="deletion-log mt-3">
+                      {deletionHistory.map((d, i) => (
+                        <div key={`${d.profile_id}-${i}`} className="deletion-log-row">
+                          <span className="deletion-log-name" title={d.email || d.label}>
+                            {d.label || d.email || d.profile_id}
+                          </span>
+                          <span className="deletion-log-meta">
+                            {(d.provider || "").toUpperCase()} · {new Date(d.deleted_at).toLocaleString()}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )
                 )}
               </div>
             </div>
@@ -898,37 +1199,102 @@ function App() {
         <div className="modal-overlay" onClick={() => setEditProfile(null)}>
           <div className="modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">EDIT_ACCOUNT</h2>
+              <h2 className="modal-title">Chỉnh sửa</h2>
               <button className="modal-close" onClick={() => setEditProfile(null)}><X size={20} /></button>
             </div>
             <div className="modal-form">
+              <div className="modal-field-row">
+                <div className="modal-field">
+                  <div className="modal-label">NGÀY ADD</div>
+                  <input
+                    type="date"
+                    className="modal-input"
+                    value={editDate}
+                    onClick={(e) => {
+                      const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
+                      el.showPicker?.();
+                    }}
+                    onChange={(e) => setEditDate(e.target.value)}
+                  />
+                </div>
+                <div className="modal-field">
+                  <div className="modal-label">GIÁ TIỀN</div>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="modal-input"
+                    value={formatVNDInput(editPrice)}
+                    onChange={(e) => setEditPrice(parseVNDInput(e.target.value))}
+                  />
+                </div>
+              </div>
               <div className="modal-field">
-                <div className="modal-label">NGÀY ADD</div>
+                <div className="modal-label">TÊN SHOP</div>
+                <div className="shop-combobox">
+                  <input
+                    className="modal-input"
+                    value={editShopName}
+                    placeholder="Chọn hoặc tạo shop"
+                    onFocus={() => setShowEditShopSuggestions(true)}
+                    onBlur={() => window.setTimeout(() => setShowEditShopSuggestions(false), 120)}
+                    onChange={(e) => { setEditShopName(e.target.value); setShowEditShopSuggestions(true); }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        setShowEditShopSuggestions(false);
+                      }
+                    }}
+                  />
+                  {showEditShopSuggestions && (
+                    <div className="shop-suggestion-list">
+                      {editShopSuggestions.length === 0 && !canCreateEditShop && <div className="shop-suggestion-empty">Không có shop khớp</div>}
+                      {editShopSuggestions.map((shop) => (
+                        <button
+                          key={shop}
+                          type="button"
+                          className="shop-suggestion-item"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => { setEditShopName(shop); setShowEditShopSuggestions(false); }}
+                        >
+                          <span>{shop}</span>
+                        </button>
+                      ))}
+                      {canCreateEditShop && (
+                        <button
+                          type="button"
+                          className="shop-suggestion-item shop-suggestion-create"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => setShowEditShopSuggestions(false)}
+                        >
+                          <span>Tạo shop: {editShopName.trim()}</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+                {canCreateEditShop && <div className="modal-hint">Shop mới sẽ được thêm vào danh mục khi lưu account.</div>}
+              </div>
+              <div className="modal-field">
+                <div className="modal-label">TÊN KHÁCH HÀNG</div>
                 <input
-                  type="date"
                   className="modal-input"
-                  value={editDate}
-                  onClick={(e) => {
-                    const el = e.currentTarget as HTMLInputElement & { showPicker?: () => void };
-                    el.showPicker?.();
-                  }}
-                  onChange={(e) => setEditDate(e.target.value)}
+                  value={editCustomerName}
+                  placeholder="Tên khách để quản lý"
+                  onChange={(e) => setEditCustomerName(e.target.value)}
                 />
               </div>
               <div className="modal-field">
-                <div className="modal-label">GIÁ TIỀN (VNĐ)</div>
-                <input
-                  type="number"
-                  min={0}
-                  className="modal-input"
-                  value={editPrice}
-                  onChange={(e) => setEditPrice(Math.max(0, Number(e.target.value)))}
+                <div className="modal-label">GHI CHÚ</div>
+                <textarea
+                  className="modal-input modal-textarea"
+                  value={editNote}
+                  placeholder="Ghi chú nội bộ, không hiển thị trên card"
+                  onChange={(e) => setEditNote(e.target.value)}
                 />
-                {editPrice > 0 && <div className="modal-hint">{formatVND(editPrice)}</div>}
               </div>
               <div className="modal-field">
                 <div className="modal-label">PHÂN LOẠI SỬ DỤNG</div>
-                <div className="audience-radio-group">
+                <div className="audience-radio-group audience-radio-inline">
                   <label className="audience-radio-row">
                     <input
                       type="radio"
@@ -937,7 +1303,7 @@ function App() {
                       checked={editAudience === "personal"}
                       onChange={() => setEditAudience("personal")}
                     />
-                    <span>Tài khoản sử dụng cho cá nhân</span>
+                    <span>Cá nhân</span>
                   </label>
                   <label className="audience-radio-row">
                     <input
@@ -947,7 +1313,7 @@ function App() {
                       checked={editAudience === "customer"}
                       onChange={() => setEditAudience("customer")}
                     />
-                    <span>Tài khoản sử dụng cho khách</span>
+                    <span>Khách hàng</span>
                   </label>
                 </div>
               </div>
@@ -1041,8 +1407,75 @@ function App() {
   );
 }
 
+function MultiFilterMenu({
+  label,
+  options,
+  selected,
+  open,
+  onToggleOpen,
+  onToggle,
+  emptyLabel = "Không có lựa chọn",
+}: {
+  label: string;
+  options: FilterOption[];
+  selected: string[];
+  open: boolean;
+  onToggleOpen: () => void;
+  onToggle: (value: string) => void;
+  emptyLabel?: string;
+}) {
+  const activeText = selected.length > 0 ? `${label} (${selected.length})` : label;
+  return (
+    <div className="filter-menu">
+      <button type="button" className={clsx("filter-menu-button", selected.length > 0 && "active", open && "open")} onClick={onToggleOpen}>
+        <span>{activeText}</span>
+        <span>{open ? "▲" : "▼"}</span>
+      </button>
+      {open && (
+        <div className="filter-menu-panel">
+          {options.length === 0 && <div className="filter-menu-empty">{emptyLabel}</div>}
+          {options.map((option) => {
+            const checked = selected.some((value) => sameText(value, option.value));
+            return (
+              <button
+                key={option.value}
+                type="button"
+                className={clsx("filter-menu-option", checked && "selected")}
+                onClick={() => onToggle(option.value)}
+              >
+                <span>{option.label}</span>
+                <span>{checked ? "✓" : ""}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 const formatVND = (value: number): string =>
   `${new Intl.NumberFormat("vi-VN").format(value)} ₫`;
+
+const formatVNDInput = (value: number): string =>
+  value > 0 ? formatVND(value) : "";
+
+const parseVNDInput = (value: string): number => {
+  const digits = value.replace(/\D/g, "");
+  return digits ? Number(digits) : 0;
+};
+
+const renderQuotaSummary = (summary: string) => {
+  const match = summary.match(/^(.*?\bresets\s+)(\d{4}-\d{2}-\d{2})(.*)$/i);
+  if (!match) return summary;
+  return (
+    <>
+      {match[1]}
+      <strong className="quota-reset-date">{match[2]}</strong>
+      {match[3]}
+    </>
+  );
+};
 
 const getProviderLogo = (p: string) => {
   switch (p.toLowerCase()) {
@@ -1069,17 +1502,118 @@ const meterTone = (percent: number) => {
 
 const isUnhealthy = (status: string) => {
   const normalized = status.toLowerCase();
-  return normalized === "failed" || normalized === "limited" || normalized === "no_auth";
+  return normalized === "failed" || normalized === "no_auth";
 };
 
 const isHealthy = (status: string) => status.toLowerCase() === "ok";
 
+const isLimited = (status: string) => status.toLowerCase() === "limited";
+
 const healthTextClass = (status: string) => {
   if (isHealthy(status)) return "card-meta-health-ok";
+  if (isLimited(status)) return "card-meta-health-limited";
   if (isUnhealthy(status)) return "card-meta-health-error";
   return "";
 };
 
 const normalizeAudience = (value: string) => value.toLowerCase() === "customer" ? "customer" : "personal";
+
+const sameText = (a: string, b: string): boolean =>
+  a.trim().toLowerCase() === b.trim().toLowerCase();
+
+const uniqueText = (values: string[]): string[] => {
+  const out: string[] = [];
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (!trimmed || out.some((item) => sameText(item, trimmed))) continue;
+    out.push(trimmed);
+  }
+  return out;
+};
+
+const toggleFilterValue = <T extends string>(current: T[], value: T): T[] =>
+  current.some((item) => sameText(item, value))
+    ? current.filter((item) => !sameText(item, value))
+    : [...current, value];
+
+const normalizeHealth = (value: string): HealthFilter => {
+  const normalized = value.toLowerCase();
+  if (normalized === "ok") return "ok";
+  if (normalized === "limited") return "limited";
+  if (normalized === "no_auth") return "no_auth";
+  if (normalized === "failed") return "failed";
+  return "unknown";
+};
+
+const formatHealthMessage = (value: string): string =>
+  value.replace(/^\s*skipped:\s*/i, "");
+
+const audienceLabel = (value: AudienceValue): string =>
+  value === "customer" ? "Khách hàng" : "Cá nhân";
+
+const healthLabel = (value: HealthFilter): string => {
+  switch (value) {
+    case "ok": return "Probe OK";
+    case "limited": return "Quota limited";
+    case "no_auth": return "No auth";
+    default: return "Check failed";
+  }
+};
+
+const audienceSortLabel = (value: AudienceSort): string =>
+  value === "customer_first" ? "Khách hàng trước" : "Cá nhân trước";
+
+const monthSortLabel = (value: MonthSort): string =>
+  value === "newest" ? "Tháng mới trước" : "Tháng cũ trước";
+
+const priceSortLabel = (value: PriceSort): string =>
+  value === "asc" ? "Giá thấp - cao" : "Giá cao - thấp";
+
+type ProfileSortOptions = {
+  audienceSort: AudienceSort;
+  monthSort: MonthSort;
+  healthSort: HealthSort;
+  priceSort: PriceSort;
+};
+
+const compareProfiles = (a: ProfileCard, b: ProfileCard, options: ProfileSortOptions): number => {
+  const audienceComparison = compareAudience(a, b, options.audienceSort);
+  if (audienceComparison !== 0) return audienceComparison;
+
+  const monthComparison = compareMonth(a, b, options.monthSort);
+  if (monthComparison !== 0) return monthComparison;
+
+  const healthComparison = compareHealth(a, b, options.healthSort);
+  if (healthComparison !== 0) return healthComparison;
+
+  const priceComparison = comparePrice(a, b, options.priceSort);
+  if (priceComparison !== 0) return priceComparison;
+
+  return (a.label || a.email).localeCompare(b.label || b.email);
+};
+
+const compareAudience = (a: ProfileCard, b: ProfileCard, sort: AudienceSort): number => {
+  if (!sort) return 0;
+  const order = sort === "customer_first" ? ["customer", "personal"] : ["personal", "customer"];
+  return order.indexOf(normalizeAudience(a.audience)) - order.indexOf(normalizeAudience(b.audience));
+};
+
+const compareHealth = (a: ProfileCard, b: ProfileCard, sort: HealthSort): number => {
+  if (!sort) return 0;
+  const rank = (profile: ProfileCard) => normalizeHealth(profile.healthStatus) === "ok" ? 0 : 1;
+  return rank(a) - rank(b);
+};
+
+const compareMonth = (a: ProfileCard, b: ProfileCard, sort: MonthSort): number => {
+  if (!sort) return 0;
+  const aTime = Date.parse(a.createdAtISO || "") || 0;
+  const bTime = Date.parse(b.createdAtISO || "") || 0;
+  return sort === "newest" ? bTime - aTime : aTime - bTime;
+};
+
+const comparePrice = (a: ProfileCard, b: ProfileCard, sort: PriceSort): number => {
+  if (!sort) return 0;
+  return sort === "asc" ? a.price - b.price : b.price - a.price;
+};
 
 export default App;

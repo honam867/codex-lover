@@ -50,6 +50,7 @@ func DefaultConfig() model.Config {
 			ListenAddress: "127.0.0.1:47070",
 		},
 		Profiles:            []model.Profile{},
+		Shops:               []string{},
 		AutoRotateCodex:     false,
 		AutoRotateThreshold: 5.0,
 		Trigger: model.TriggerConfig{

@@ -19,6 +19,11 @@ var (
 	// ChatGPT-account Codex, confirmed by the Phase 0 live probe. Only these
 	// models are accepted on the /responses endpoint for a ChatGPT account.
 	DefaultTriggerModels = []string{"gpt-5.4-mini", "gpt-5.5", "gpt-5.4"}
+
+	// DefaultHealthProbeModels deliberately uses only the cheapest accepted model.
+	// Health checks only need to verify auth/account liveness, not open quota by
+	// falling back to more expensive models.
+	DefaultHealthProbeModels = []string{"gpt-5.4-mini"}
 )
 
 // TriggerResult reports the outcome of a successful trigger.
@@ -91,6 +96,10 @@ func TriggerWindow(auth *ProfileAuth, models []string) (*TriggerResult, *AuthFil
 		return nil, refreshedFile, err
 	}
 	return result, refreshedFile, nil
+}
+
+func TriggerHealthProbe(auth *ProfileAuth) (*TriggerResult, *AuthFile, error) {
+	return TriggerWindow(auth, DefaultHealthProbeModels)
 }
 
 func doTriggerOnce(accessToken string, accountID string, models []string) (*TriggerResult, int, error) {
@@ -175,6 +184,27 @@ func TriggerFromCachedAuth(cacheRoot string, profileID string, models []string) 
 		return nil, err
 	}
 	result, authFile, triggerErr := TriggerWindow(auth, models)
+	if authFile != nil {
+		if perr := persistRefreshedTokensAtPath(authPath, authFile); perr != nil {
+			if triggerErr != nil {
+				return nil, triggerErr
+			}
+			return nil, perr
+		}
+	}
+	if triggerErr != nil {
+		return nil, triggerErr
+	}
+	return result, nil
+}
+
+func TriggerHealthProbeFromCachedAuth(cacheRoot string, profileID string) (*TriggerResult, error) {
+	authPath := cachedAuthPath(cacheRoot, profileID)
+	auth, err := LoadCachedProfileAuth(cacheRoot, profileID)
+	if err != nil {
+		return nil, err
+	}
+	result, authFile, triggerErr := TriggerHealthProbe(auth)
 	if authFile != nil {
 		if perr := persistRefreshedTokensAtPath(authPath, authFile); perr != nil {
 			if triggerErr != nil {

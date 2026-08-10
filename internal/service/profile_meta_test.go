@@ -12,7 +12,7 @@ func TestApplyProfileMeta(t *testing.T) {
 	now := time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC)
 	base := model.Profile{ID: "codex-a", Label: "a", Tool: model.ToolCodex, Email: "a@x.com"}
 
-	got := applyProfileMeta(base, created, 300000, model.ProfileAudienceCustomer, now)
+	got := applyProfileMeta(base, created, 300000, model.ProfileAudienceCustomer, " Shop A ", " Customer A ", " Note A ", now)
 	if !got.CreatedAt.Equal(created) {
 		t.Fatalf("CreatedAt = %v, want %v", got.CreatedAt, created)
 	}
@@ -21,6 +21,15 @@ func TestApplyProfileMeta(t *testing.T) {
 	}
 	if got.Audience != model.ProfileAudienceCustomer {
 		t.Fatalf("Audience = %q, want %q", got.Audience, model.ProfileAudienceCustomer)
+	}
+	if got.ShopName != "Shop A" {
+		t.Fatalf("ShopName = %q, want Shop A", got.ShopName)
+	}
+	if got.CustomerName != "Customer A" {
+		t.Fatalf("CustomerName = %q, want Customer A", got.CustomerName)
+	}
+	if got.Note != "Note A" {
+		t.Fatalf("Note = %q, want Note A", got.Note)
 	}
 	if !got.UpdatedAt.Equal(now) {
 		t.Fatalf("UpdatedAt not set to now")
@@ -31,7 +40,7 @@ func TestApplyProfileMeta(t *testing.T) {
 
 	// zero createdAt keeps the existing date
 	withDate := model.Profile{ID: "b", CreatedAt: created}
-	got2 := applyProfileMeta(withDate, time.Time{}, 500000, "", now)
+	got2 := applyProfileMeta(withDate, time.Time{}, 500000, "", "", "", "", now)
 	if !got2.CreatedAt.Equal(created) {
 		t.Fatalf("zero createdAt must keep existing date, got %v", got2.CreatedAt)
 	}

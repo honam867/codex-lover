@@ -37,6 +37,26 @@ func TestBuildSnapshotIncludesAudience(t *testing.T) {
 	}
 }
 
+func TestBuildSnapshotIncludesShopCustomerAndNote(t *testing.T) {
+	snapshot := buildSnapshot([]model.ProfileStatus{{
+		Profile: model.Profile{ID: "codex-a", Tool: model.ToolCodex, Provider: model.ToolCodex, ShopName: "Shop A", CustomerName: "Customer A", Note: "private note"},
+	}}, nil)
+
+	if len(snapshot.Profiles) != 1 {
+		t.Fatalf("profiles len = %d, want 1", len(snapshot.Profiles))
+	}
+	card := snapshot.Profiles[0]
+	if card.ShopName != "Shop A" {
+		t.Fatalf("ShopName = %q, want Shop A", card.ShopName)
+	}
+	if card.CustomerName != "Customer A" {
+		t.Fatalf("CustomerName = %q, want Customer A", card.CustomerName)
+	}
+	if card.Note != "private note" {
+		t.Fatalf("Note = %q, want private note", card.Note)
+	}
+}
+
 func TestBuildSnapshotIncludesHealthFields(t *testing.T) {
 	checkedAt := time.Date(2026, 8, 1, 9, 30, 0, 0, time.UTC)
 	snapshot := buildSnapshot([]model.ProfileStatus{{

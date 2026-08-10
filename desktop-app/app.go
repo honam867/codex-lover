@@ -46,6 +46,9 @@ type ProfileCard struct {
 	LastTriggeredAtText string `json:"lastTriggeredAtText"`
 	LastTriggeredModel  string `json:"lastTriggeredModel"`
 	Price               int64  `json:"price"`
+	ShopName            string `json:"shopName"`
+	CustomerName        string `json:"customerName"`
+	Note                string `json:"note"`
 	CreatedAtISO        string `json:"createdAtISO"`
 	HealthStatus        string `json:"healthStatus"`
 	HealthMessage       string `json:"healthMessage"`
@@ -183,6 +186,28 @@ func (a *App) CheckProfileHealth() ActionResponse {
 	return ActionResponse{Message: fmt.Sprintf("Checked %d Codex account(s)", checked), Snapshot: snapshot}
 }
 
+func (a *App) CheckSingleProfileHealth(profileID string) ActionResponse {
+	if err := a.ensureReady(); err != nil {
+		return ActionResponse{Message: "Health check failed", Error: "Desktop service is not ready", Snapshot: a.mustSnapshotFallback()}
+	}
+
+	a.mu.Lock()
+	statuses, err := a.svc.RefreshAllWithOptions(service.RefreshOptions{SkipUsageForTools: map[string]bool{model.ToolCodex: true}})
+	if err == nil {
+		_, err = a.svc.CheckCodexProfileHealthByID(statuses, profileID)
+	}
+	a.mu.Unlock()
+	if err != nil {
+		return ActionResponse{Message: "Health check failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
+	}
+
+	snapshot, err := a.snapshot(false)
+	if err != nil {
+		return ActionResponse{Message: "Checked 1 Codex account", Error: "Health check completed, but snapshot refresh failed", Snapshot: a.mustSnapshotFallback()}
+	}
+	return ActionResponse{Message: "Checked 1 Codex account", Snapshot: snapshot}
+}
+
 func (a *App) ActivateProfile(profileID string) ActionResponse {
 	if err := a.ensureReady(); err != nil {
 		return ActionResponse{
@@ -268,7 +293,7 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 	}
 }
 
-func (a *App) UpdateProfileMeta(profileID string, createdAtISO string, price int64, audience string) ActionResponse {
+func (a *App) UpdateProfileMeta(profileID string, createdAtISO string, price int64, audience string, shopName string, customerName string, note string) ActionResponse {
 	if err := a.ensureReady(); err != nil {
 		return ActionResponse{Message: "Update failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
 	}
@@ -281,7 +306,7 @@ func (a *App) UpdateProfileMeta(profileID string, createdAtISO string, price int
 		createdAt = parsed.UTC()
 	}
 	a.mu.Lock()
-	_, err := a.svc.UpdateProfileMeta(profileID, createdAt, price, audience)
+	_, err := a.svc.UpdateProfileMeta(profileID, createdAt, price, audience, shopName, customerName, note)
 	a.mu.Unlock()
 	if err != nil {
 		return ActionResponse{Message: "Update failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
@@ -304,6 +329,32 @@ func (a *App) GetConfig() model.Config {
 		return model.Config{}
 	}
 	return cfg
+}
+
+func (a *App) AddShop(name string) []string {
+	if err := a.ensureReady(); err != nil {
+		return []string{}
+	}
+	a.mu.Lock()
+	shops, err := a.svc.AddShop(name)
+	a.mu.Unlock()
+	if err != nil {
+		return []string{}
+	}
+	return shops
+}
+
+func (a *App) RemoveShop(name string) []string {
+	if err := a.ensureReady(); err != nil {
+		return []string{}
+	}
+	a.mu.Lock()
+	shops, err := a.svc.RemoveShop(name)
+	a.mu.Unlock()
+	if err != nil {
+		return []string{}
+	}
+	return shops
 }
 
 func (a *App) SetAutoRotateCodex(enabled bool) error {
@@ -477,6 +528,9 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			LastTriggeredAtText: formatLastTriggeredAt(status.State.LastTriggeredAt),
 			LastTriggeredModel:  status.State.LastTriggeredModel,
 			Price:               status.Profile.Price,
+			ShopName:            status.Profile.ShopName,
+			CustomerName:        status.Profile.CustomerName,
+			Note:                status.Profile.Note,
 			CreatedAtISO:        formatCreatedAtISO(status.Profile.CreatedAt),
 			HealthStatus:        nonEmpty(status.State.HealthStatus, model.HealthStatusUnknown),
 			HealthMessage:       status.State.HealthMessage,

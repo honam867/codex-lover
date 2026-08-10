@@ -39,7 +39,7 @@ func TestClassifyProfileHealth(t *testing.T) {
 			wantMsg:    "Forbidden or blocked",
 		},
 		{
-			name:       "rate limited",
+			name:       "rate limited is skipped instead of failed",
 			err:        &codex.TriggerError{StatusCode: http.StatusTooManyRequests},
 			wantStatus: model.HealthStatusLimited,
 			wantMsg:    "Quota or rate limited",
@@ -148,5 +148,57 @@ func TestCheckCodexProfileHealthStatusesReusesSourceProbe(t *testing.T) {
 	}
 	if results[0].ProfileID != "visible-a" || results[1].ProfileID != "visible-b" {
 		t.Fatalf("visible profile IDs must be preserved: %+v", results)
+	}
+}
+
+func TestCheckSingleCodexProfileHealthStatusOnlyProbesSelectedProfile(t *testing.T) {
+	statuses := []model.ProfileStatus{
+		{Profile: model.Profile{ID: "visible-a", Tool: model.ToolCodex}},
+		{Profile: model.Profile{ID: "visible-b", Tool: model.ToolCodex}},
+	}
+	var probed []string
+
+	result, ok := checkSingleCodexProfileHealthStatus(
+		statuses,
+		"visible-b",
+		func(p model.Profile) (string, bool) { return "source-" + p.ID, true },
+		func(sourceProfileID string) (*codex.TriggerResult, error) {
+			probed = append(probed, sourceProfileID)
+			return &codex.TriggerResult{ModelUsed: "gpt-5.4-mini", Status: http.StatusOK}, nil
+		},
+	)
+
+	if !ok {
+		t.Fatalf("expected selected Codex profile to be found")
+	}
+	if len(probed) != 1 || probed[0] != "source-visible-b" {
+		t.Fatalf("probed = %v, want only source-visible-b", probed)
+	}
+	if result.ProfileID != "visible-b" || result.Status != model.HealthStatusOK {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+}
+
+func TestCheckSingleCodexProfileHealthStatusIgnoresNonCodexProfile(t *testing.T) {
+	statuses := []model.ProfileStatus{
+		{Profile: model.Profile{ID: "claude-a", Tool: model.ToolClaude}},
+	}
+	called := false
+
+	_, ok := checkSingleCodexProfileHealthStatus(
+		statuses,
+		"claude-a",
+		func(model.Profile) (string, bool) { return "source", true },
+		func(string) (*codex.TriggerResult, error) {
+			called = true
+			return &codex.TriggerResult{}, nil
+		},
+	)
+
+	if ok {
+		t.Fatalf("non-Codex profile must not be selectable for Codex health check")
+	}
+	if called {
+		t.Fatalf("trigger must not be called for non-Codex profile")
 	}
 }

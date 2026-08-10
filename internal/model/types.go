@@ -36,6 +36,7 @@ type Config struct {
 	PollIntervalSeconds int           `json:"poll_interval_seconds"`
 	Daemon              DaemonConfig  `json:"daemon"`
 	Profiles            []Profile     `json:"profiles"`
+	Shops               []string      `json:"shops,omitempty"`
 	AutoRotateCodex     bool          `json:"auto_rotate_codex"`
 	AutoRotateThreshold float64       `json:"auto_rotate_threshold"`
 	Trigger             TriggerConfig `json:"trigger"`
@@ -80,6 +81,9 @@ type Profile struct {
 	Plan           string    `json:"plan,omitempty"`
 	Price          int64     `json:"price,omitempty"` // purchase price in VNĐ (integer dong)
 	Audience       string    `json:"audience,omitempty"`
+	ShopName       string    `json:"shop_name,omitempty"`
+	CustomerName   string    `json:"customer_name,omitempty"`
+	Note           string    `json:"note,omitempty"`
 	Blocked        bool      `json:"blocked,omitempty"`
 	Enabled        bool      `json:"enabled"`
 	AutoDiscovered bool      `json:"auto_discovered,omitempty"`

@@ -68,6 +68,36 @@ func TestTriggerWindowAllModelsRejected(t *testing.T) {
 	}
 }
 
+func TestTriggerHealthProbeUsesOnlyCheapestModel(t *testing.T) {
+	var seenModels []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		if modelName, _ := payload["model"].(string); modelName != "" {
+			seenModels = append(seenModels, modelName)
+		}
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+	old := responsesURL
+	responsesURL = server.URL
+	defer func() { responsesURL = old }()
+
+	auth := &ProfileAuth{AccessToken: "tok", AccountID: "a"}
+	_, _, err := TriggerHealthProbe(auth)
+	if err == nil {
+		t.Fatalf("expected error when cheapest health model is rejected")
+	}
+	if len(seenModels) != 1 {
+		t.Fatalf("health probe tried %d models (%v), want exactly 1", len(seenModels), seenModels)
+	}
+	if seenModels[0] != "gpt-5.4-mini" {
+		t.Fatalf("health probe model = %q, want gpt-5.4-mini", seenModels[0])
+	}
+}
+
 func TestTriggerWindowAllModelsRejectedReturnsTriggerError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusForbidden)
