@@ -7,6 +7,7 @@ import {
   Ban,
   Check,
   Cpu,
+  FileSpreadsheet,
   LayoutDashboard,
   Plus,
   RefreshCw,
@@ -20,6 +21,7 @@ import {
   AddAccount,
   AddShop,
   CheckSingleProfileHealth,
+  ExportProfilesToExcel,
   GetConfig,
   GetDeletionHistory,
   GetInitialSnapshot,
@@ -173,6 +175,7 @@ function App() {
   const [busyProfile, setBusyProfile] = useState<string>("");
   const [healthPickMode, setHealthPickMode] = useState<boolean>(false);
   const [checkingProfile, setCheckingProfile] = useState<string>("");
+  const [exportingExcel, setExportingExcel] = useState<boolean>(false);
   const [statusText, setStatusText] = useState<string>("SYSTEM_READY");
   const [providerFilter, setProviderFilter] = useState<string>("all");
   const [audienceFilters, setAudienceFilters] = useState<AudienceValue[]>([]);
@@ -407,6 +410,20 @@ function App() {
     }
   }
 
+  async function exportExcel() {
+    if (exportingExcel) return;
+    setExportingExcel(true);
+    setStatusText("EXPORTING_EXCEL...");
+    try {
+      const result = await ExportProfilesToExcel(sortedProfiles as any);
+      applyAction(result);
+    } catch {
+      setStatusText("ERROR: EXPORT FAILED");
+    } finally {
+      setExportingExcel(false);
+    }
+  }
+
   function applyAction(result: ActionResponse) {
     setSnapshot(result.snapshot);
     setStatusText(result.error ? `ERROR: ${result.error}` : result.message || `CORE_LOADED: ${result.snapshot.generatedAt}`);
@@ -627,6 +644,15 @@ function App() {
             >
               {checkingProfile ? <RefreshCw size={14} className="loading-spinner" /> : <ShieldCheck size={14} />}
               {checkingProfile ? "Đang check..." : healthPickMode ? "Chọn tài khoản" : "Check trạng thái"}
+            </button>
+            <button
+              onClick={() => void exportExcel()}
+              className={clsx("cyber-btn flex items-center gap-2", exportingExcel && "cyber-btn-loading")}
+              disabled={exportingExcel || sortedProfiles.length === 0}
+              title="Export các card đang hiển thị ra Excel, không gồm quota và health"
+            >
+              {exportingExcel ? <RefreshCw size={14} className="loading-spinner" /> : <FileSpreadsheet size={14} />}
+              {exportingExcel ? "Đang export..." : "Export Excel"}
             </button>
             <button onClick={() => setShowAddModal(true)} className="cyber-btn cyber-btn-solid flex items-center gap-2">
               <Plus size={14} /> New Link
