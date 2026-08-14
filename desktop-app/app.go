@@ -52,6 +52,7 @@ type ProfileCard struct {
 	CreatedAtISO        string `json:"createdAtISO"`
 	HealthStatus        string `json:"healthStatus"`
 	HealthMessage       string `json:"healthMessage"`
+	HealthLabel         string `json:"healthLabel"`
 	HealthCheckedAtText string `json:"healthCheckedAtText"`
 	EndAtText           string `json:"endAtText"`
 	DaysRemainingText   string `json:"daysRemainingText"`
@@ -193,10 +194,16 @@ func (a *App) CheckSingleProfileHealth(profileID string) ActionResponse {
 
 	a.mu.Lock()
 	statuses, err := a.svc.RefreshAllWithOptions(service.RefreshOptions{SkipUsageForTools: map[string]bool{model.ToolCodex: true}})
-	if err == nil {
-		_, err = a.svc.CheckCodexProfileHealthByID(statuses, profileID)
-	}
 	a.mu.Unlock()
+	if err == nil {
+		var result service.ProfileHealthResult
+		result, err = a.svc.ProbeCodexProfileHealthByID(statuses, profileID)
+		if err == nil {
+			a.mu.Lock()
+			err = a.svc.SaveCodexProfileHealthResult(result)
+			a.mu.Unlock()
+		}
+	}
 	if err != nil {
 		return ActionResponse{Message: "Health check failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
 	}
@@ -504,7 +511,9 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 		endAtText, daysRemainingText, daysUsedText := "", "", ""
 		if status.Profile.Tool == model.ToolCodex {
 			endAtText, daysRemainingText = codexAccountExpiryTexts(status.Profile.CreatedAt, now)
-			daysUsedText = codexAccountDaysUsedText(status.Profile.CreatedAt, now)
+			if codexShouldCountDaysUsed(status.State.HealthStatus, status.State.HealthMessage) {
+				daysUsedText = codexAccountDaysUsedText(status.Profile.CreatedAt, now)
+			}
 		}
 		profiles = append(profiles, ProfileCard{
 			ID:                  status.Profile.ID,
@@ -534,6 +543,7 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			CreatedAtISO:        formatCreatedAtISO(status.Profile.CreatedAt),
 			HealthStatus:        nonEmpty(status.State.HealthStatus, model.HealthStatusUnknown),
 			HealthMessage:       status.State.HealthMessage,
+			HealthLabel:         healthDisplayLabel(status.State.HealthStatus),
 			HealthCheckedAtText: formatTimePointer(status.State.HealthCheckedAt),
 			EndAtText:           endAtText,
 			DaysRemainingText:   daysRemainingText,
@@ -709,6 +719,32 @@ func codexAccountExpiryTexts(createdAt time.Time, now time.Time) (string, string
 	}
 	days := int(endDate.Sub(nowDate).Hours() / 24)
 	return endAt.Format("02/01/2006"), fmt.Sprintf("còn %d ngày", days)
+}
+
+func codexShouldCountDaysUsed(healthStatus string, healthMessage string) bool {
+	switch strings.ToLower(strings.TrimSpace(healthStatus)) {
+	case model.HealthStatusNoAuth:
+		return false
+	case model.HealthStatusFailed:
+		message := strings.ToLower(strings.TrimSpace(healthMessage))
+		return !(strings.Contains(message, "unauthorized") ||
+			strings.Contains(message, "expired") ||
+			strings.Contains(message, "forbidden") ||
+			strings.Contains(message, "blocked"))
+	default:
+		return true
+	}
+}
+
+func healthDisplayLabel(healthStatus string) string {
+	switch strings.ToLower(strings.TrimSpace(healthStatus)) {
+	case model.HealthStatusOK, model.HealthStatusLimited:
+		return "Still Alive"
+	case model.HealthStatusFailed, model.HealthStatusNoAuth:
+		return "Dead"
+	default:
+		return ""
+	}
 }
 
 func codexAccountDaysUsedText(createdAt time.Time, now time.Time) string {

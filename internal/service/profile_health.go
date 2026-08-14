@@ -18,6 +18,17 @@ type ProfileHealthResult struct {
 }
 
 func (s *Service) CheckCodexProfileHealthByID(statuses []model.ProfileStatus, profileID string) (ProfileHealthResult, error) {
+	result, err := s.ProbeCodexProfileHealthByID(statuses, profileID)
+	if err != nil {
+		return result, err
+	}
+	if err := s.SaveCodexProfileHealthResult(result); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
+func (s *Service) ProbeCodexProfileHealthByID(statuses []model.ProfileStatus, profileID string) (ProfileHealthResult, error) {
 	profiles := statusesToProfiles(statuses)
 	result, ok := checkSingleCodexProfileHealthStatus(
 		statuses,
@@ -30,16 +41,19 @@ func (s *Service) CheckCodexProfileHealthByID(statuses []model.ProfileStatus, pr
 	if !ok {
 		return ProfileHealthResult{}, fmt.Errorf("Codex profile %q not found", profileID)
 	}
+	return result, nil
+}
 
+func (s *Service) SaveCodexProfileHealthResult(result ProfileHealthResult) error {
 	state, err := s.store.LoadState()
 	if err != nil {
-		return result, err
+		return err
 	}
 	state = applyProfileHealthStamps(state, []ProfileHealthResult{result}, time.Now().UTC())
 	if err := s.store.SaveState(state); err != nil {
-		return result, err
+		return err
 	}
-	return result, nil
+	return nil
 }
 
 func (s *Service) CheckCodexProfileHealth(statuses []model.ProfileStatus) ([]ProfileHealthResult, error) {

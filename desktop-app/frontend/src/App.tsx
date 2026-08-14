@@ -71,6 +71,7 @@ type ProfileCard = {
   createdAtISO: string;
   healthStatus: string;
   healthMessage: string;
+  healthLabel: string;
   healthCheckedAtText: string;
   endAtText: string;
   daysRemainingText: string;
@@ -164,7 +165,7 @@ const AUDIENCE_OPTIONS: Array<[AudienceValue, string]> = [
 ];
 
 const HEALTH_OPTIONS: Array<[HealthFilter, string]> = [
-  ["ok", "Probe OK"],
+  ["ok", "Still Alive"],
   ["limited", "Quota limited"],
   ["failed", "Check failed"],
   ["no_auth", "No auth"],
@@ -174,7 +175,7 @@ function App() {
   const [snapshot, setSnapshot] = useState<Snapshot>({ generatedAt: "", profiles: [] });
   const [busyProfile, setBusyProfile] = useState<string>("");
   const [healthPickMode, setHealthPickMode] = useState<boolean>(false);
-  const [checkingProfile, setCheckingProfile] = useState<string>("");
+  const [checkingProfiles, setCheckingProfiles] = useState<string[]>([]);
   const [exportingExcel, setExportingExcel] = useState<boolean>(false);
   const [statusText, setStatusText] = useState<string>("SYSTEM_READY");
   const [providerFilter, setProviderFilter] = useState<string>("all");
@@ -387,26 +388,26 @@ function App() {
   }
 
   async function checkHealth() {
-    if (checkingProfile) return;
     setHealthPickMode((enabled) => !enabled);
     setStatusText(healthPickMode ? "SYSTEM_READY" : "SELECT_ACCOUNT_TO_CHECK");
   }
 
   async function checkSingleProfileHealth(profile: ProfileCard) {
-    if (!healthPickMode || checkingProfile || profile.provider.toLowerCase() !== "codex") return;
+    if (!healthPickMode || profile.provider.toLowerCase() !== "codex") return;
+    if (checkingProfiles.includes(profile.id)) return;
     const confirmed = window.confirm(
       `Check trạng thái cho ${profile.label || profile.email}? ` +
         "Request này sẽ dùng cached Codex auth, có thể refresh token và có thể ảnh hưởng quota window. Tiếp tục?"
     );
     if (!confirmed) return;
     setStatusText(`CHECKING ${profile.label || profile.email}...`);
-    setCheckingProfile(profile.id);
+    setCheckingProfiles((current) => current.includes(profile.id) ? current : [...current, profile.id]);
     try {
       const result = await CheckSingleProfileHealth(profile.id);
       applyAction(result);
       setStatusText(result.error ? `ERROR: ${result.error}` : "SELECT_ACCOUNT_TO_CHECK");
     } finally {
-      setCheckingProfile("");
+      setCheckingProfiles((current) => current.filter((id) => id !== profile.id));
     }
   }
 
@@ -565,6 +566,7 @@ function App() {
   }, [shopOptions]);
 
   const zoomLevel = ZOOM_LEVELS[zoomIndex] ?? 1;
+  const checkingProfileCount = checkingProfiles.length;
   const hasActiveFilters = audienceFilters.length > 0 || healthFilters.length > 0 || providerFilters.length > 0 || shopFilters.length > 0;
   const hasActiveSorts = Boolean(audienceSort || monthSort || healthSort || priceSort);
   const toggleFilterMenu = (menu: FilterMenuKey) => setOpenFilterMenu((current) => current === menu ? "" : menu);
@@ -638,12 +640,12 @@ function App() {
             </button>
             <button
               onClick={() => void checkHealth()}
-              className={clsx("cyber-btn flex items-center gap-2", healthPickMode && "cyber-btn-solid", checkingProfile && "cyber-btn-loading")}
-              disabled={Boolean(checkingProfile)}
+              className={clsx("cyber-btn flex items-center gap-2", healthPickMode && "cyber-btn-solid", checkingProfileCount > 0 && "cyber-btn-loading")}
+              disabled={checkingProfileCount > 0}
               title="Bật chế độ chọn account Codex trên trang để check riêng từng account"
             >
-              {checkingProfile ? <RefreshCw size={14} className="loading-spinner" /> : <ShieldCheck size={14} />}
-              {checkingProfile ? "Đang check..." : healthPickMode ? "Chọn tài khoản" : "Check trạng thái"}
+              {checkingProfileCount > 0 ? <RefreshCw size={14} className="loading-spinner" /> : <ShieldCheck size={14} />}
+              {checkingProfileCount > 0 ? `Đang check ${checkingProfileCount}` : healthPickMode ? "Chọn tài khoản" : "Check trạng thái"}
             </button>
             <button
               onClick={() => void exportExcel()}
@@ -785,7 +787,7 @@ function App() {
                 "account-card",
                 profile.provider.toLowerCase() === "codex" && "account-card-clickable",
                 healthPickMode && profile.provider.toLowerCase() === "codex" && "account-card-health-selectable",
-                checkingProfile === profile.id && "account-card-health-checking",
+                checkingProfiles.includes(profile.id) && "account-card-health-checking",
                 profile.provider.toLowerCase() === "codex" && normalizeAudience(profile.audience) === "customer" && "account-card-customer",
                 profile.isActive && `active active-${profile.provider.toLowerCase()}`,
                 profile.provider.toLowerCase() === "codex" && isUnhealthy(profile.healthStatus) && "account-card-health-danger",
@@ -845,7 +847,7 @@ function App() {
               </div>
 
               {profile.provider.toLowerCase() === "codex" &&
-                (profile.price > 0 || profile.shopName || profile.customerName || profile.createdAtText || profile.endAtText || profile.healthMessage) && (
+                (profile.price > 0 || profile.shopName || profile.customerName || profile.createdAtText || profile.endAtText || healthResultVisible(profile)) && (
                   <div className="card-meta">
                     {profile.price > 0 && (
                       <div className="card-meta-row">
@@ -888,11 +890,11 @@ function App() {
                         <strong className="card-day-count">{profile.daysUsedText}</strong>
                       </div>
                     )}
-                    {profile.healthMessage && (
+                    {healthResultVisible(profile) && (
                       <div className={clsx("card-meta-row", healthTextClass(profile.healthStatus))}>
                         <span className="text-dim">Health</span>
                         <span>
-                          {formatHealthMessage(profile.healthMessage)}
+                          <strong>{profile.healthLabel}</strong>
                           {profile.healthCheckedAtText && profile.healthCheckedAtText !== "-" ? ` · ${profile.healthCheckedAtText}` : ""}
                         </span>
                       </div>
@@ -1537,10 +1539,13 @@ const isLimited = (status: string) => status.toLowerCase() === "limited";
 
 const healthTextClass = (status: string) => {
   if (isHealthy(status)) return "card-meta-health-ok";
-  if (isLimited(status)) return "card-meta-health-limited";
+  if (isLimited(status)) return "card-meta-health-ok";
   if (isUnhealthy(status)) return "card-meta-health-error";
   return "";
 };
+
+const healthResultVisible = (profile: ProfileCard): boolean =>
+  Boolean(profile.healthLabel && profile.healthCheckedAtText && profile.healthCheckedAtText !== "-");
 
 const normalizeAudience = (value: string) => value.toLowerCase() === "customer" ? "customer" : "personal";
 
@@ -1571,15 +1576,12 @@ const normalizeHealth = (value: string): HealthFilter => {
   return "unknown";
 };
 
-const formatHealthMessage = (value: string): string =>
-  value.replace(/^\s*skipped:\s*/i, "");
-
 const audienceLabel = (value: AudienceValue): string =>
   value === "customer" ? "Khách hàng" : "Cá nhân";
 
 const healthLabel = (value: HealthFilter): string => {
   switch (value) {
-    case "ok": return "Probe OK";
+    case "ok": return "Still Alive";
     case "limited": return "Quota limited";
     case "no_auth": return "No auth";
     default: return "Check failed";

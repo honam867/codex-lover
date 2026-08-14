@@ -84,6 +84,58 @@ func TestBuildSnapshotIncludesHealthFields(t *testing.T) {
 	}
 }
 
+func TestBuildSnapshotHealthLabel(t *testing.T) {
+	snapshot := buildSnapshot([]model.ProfileStatus{
+		{Profile: model.Profile{ID: "ok", Tool: model.ToolCodex, Provider: model.ToolCodex}, State: model.ProfileState{HealthStatus: model.HealthStatusOK}},
+		{Profile: model.Profile{ID: "limited", Tool: model.ToolCodex, Provider: model.ToolCodex}, State: model.ProfileState{HealthStatus: model.HealthStatusLimited}},
+		{Profile: model.Profile{ID: "failed", Tool: model.ToolCodex, Provider: model.ToolCodex}, State: model.ProfileState{HealthStatus: model.HealthStatusFailed}},
+		{Profile: model.Profile{ID: "no-auth", Tool: model.ToolCodex, Provider: model.ToolCodex}, State: model.ProfileState{HealthStatus: model.HealthStatusNoAuth}},
+		{Profile: model.Profile{ID: "unknown", Tool: model.ToolCodex, Provider: model.ToolCodex}, State: model.ProfileState{HealthStatus: model.HealthStatusUnknown}},
+	}, nil)
+
+	wants := []string{"Still Alive", "Still Alive", "Dead", "Dead", ""}
+	for i, want := range wants {
+		if got := snapshot.Profiles[i].HealthLabel; got != want {
+			t.Fatalf("profile %d HealthLabel = %q, want %q", i, got, want)
+		}
+	}
+}
+
+func TestBuildSnapshotSuppressesDaysUsedForDeadCodexHealth(t *testing.T) {
+	createdAt := time.Now().AddDate(0, 0, -3)
+	snapshot := buildSnapshot([]model.ProfileStatus{
+		{
+			Profile: model.Profile{ID: "dead", Tool: model.ToolCodex, Provider: model.ToolCodex, CreatedAt: createdAt},
+			State:   model.ProfileState{HealthStatus: model.HealthStatusFailed, HealthMessage: "Forbidden or blocked"},
+		},
+		{
+			Profile: model.Profile{ID: "no-auth", Tool: model.ToolCodex, Provider: model.ToolCodex, CreatedAt: createdAt},
+			State:   model.ProfileState{HealthStatus: model.HealthStatusNoAuth},
+		},
+		{
+			Profile: model.Profile{ID: "probe-failed", Tool: model.ToolCodex, Provider: model.ToolCodex, CreatedAt: createdAt},
+			State:   model.ProfileState{HealthStatus: model.HealthStatusFailed, HealthMessage: "Probe request failed"},
+		},
+		{
+			Profile: model.Profile{ID: "limited", Tool: model.ToolCodex, Provider: model.ToolCodex, CreatedAt: createdAt},
+			State:   model.ProfileState{HealthStatus: model.HealthStatusLimited},
+		},
+	}, nil)
+
+	if got := snapshot.Profiles[0].DaysUsedText; got != "" {
+		t.Fatalf("failed health DaysUsedText = %q, want empty", got)
+	}
+	if got := snapshot.Profiles[1].DaysUsedText; got != "" {
+		t.Fatalf("no_auth health DaysUsedText = %q, want empty", got)
+	}
+	if got := snapshot.Profiles[2].DaysUsedText; got == "" {
+		t.Fatalf("transient probe failure should keep counting DaysUsedText")
+	}
+	if got := snapshot.Profiles[3].DaysUsedText; got == "" {
+		t.Fatalf("limited health should keep counting DaysUsedText")
+	}
+}
+
 func TestCodexAccountExpiryTextsUseCalendarMonth(t *testing.T) {
 	createdAt := time.Date(2026, 1, 31, 8, 0, 0, 0, time.Local)
 	now := time.Date(2026, 2, 27, 12, 0, 0, 0, time.Local)
