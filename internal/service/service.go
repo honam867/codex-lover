@@ -1614,20 +1614,20 @@ func quotaScore(status model.ProfileStatus, now time.Time) (float64, bool) {
 	if primary == nil && secondary == nil {
 		return 0, false
 	}
-	score := 100.0
-	if primary != nil {
-		if primary.RemainingPercent <= 0.5 {
-			return 0, false
-		}
-		score = minFloat(score, primary.RemainingPercent)
+	if primary != nil && primary.RemainingPercent <= 0.5 {
+		return 0, false
 	}
-	if secondary != nil {
-		if secondary.RemainingPercent <= 0.5 {
-			return 0, false
-		}
-		score = minFloat(score, secondary.RemainingPercent)
+	if secondary != nil && secondary.RemainingPercent <= 0.5 {
+		return 0, false
 	}
-	return score, true
+	switch {
+	case primary != nil && secondary != nil:
+		return minFloat(primary.RemainingPercent, secondary.RemainingPercent), true
+	case primary != nil:
+		return primary.RemainingPercent, true
+	default:
+		return secondary.RemainingPercent, true
+	}
 }
 
 func minFloat(left float64, right float64) float64 {

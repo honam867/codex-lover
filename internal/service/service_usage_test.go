@@ -25,6 +25,24 @@ func TestUsageLimitReachedOnEitherWindow(t *testing.T) {
 	if !usageLimitReached(status) {
 		t.Fatal("expected exhausted secondary window to trigger limit reached")
 	}
+
+	mirrored := model.ProfileStatus{
+		Profile: model.Profile{Tool: model.ToolCodex},
+		State: model.ProfileState{
+			Usage: &model.UsageSnapshot{
+				Primary: &model.UsageWindow{
+					RemainingPercent: 0.5,
+				},
+				Secondary: &model.UsageWindow{
+					RemainingPercent: 80,
+				},
+			},
+		},
+	}
+
+	if !usageLimitReached(mirrored) {
+		t.Fatal("expected exhausted primary (5h) window to trigger limit reached")
+	}
 }
 
 func TestQuotaScoreRejectsCandidateLimitedOnEitherWindow(t *testing.T) {
@@ -46,6 +64,40 @@ func TestQuotaScoreRejectsCandidateLimitedOnEitherWindow(t *testing.T) {
 
 	if score, ok := quotaScore(status, now); ok || score != 0 {
 		t.Fatalf("expected limited candidate to be rejected, got score=%v ok=%v", score, ok)
+	}
+
+	mirrored := model.ProfileStatus{
+		Profile: model.Profile{Tool: model.ToolCodex},
+		State: model.ProfileState{
+			AuthStatus: model.AuthStatusLoggedOut,
+			Usage: &model.UsageSnapshot{
+				Primary: &model.UsageWindow{
+					RemainingPercent: 0.4,
+				},
+				Secondary: &model.UsageWindow{
+					RemainingPercent: 80,
+				},
+			},
+		},
+	}
+
+	if score, ok := quotaScore(mirrored, now); ok || score != 0 {
+		t.Fatalf("expected primary (5h) limited candidate to be rejected, got score=%v ok=%v", score, ok)
+	}
+}
+
+func TestQuotaScoreNoWindowsReturnsFalse(t *testing.T) {
+	now := time.Now()
+	status := model.ProfileStatus{
+		Profile: model.Profile{Tool: model.ToolCodex},
+		State: model.ProfileState{
+			AuthStatus: model.AuthStatusLoggedOut,
+			Usage:      &model.UsageSnapshot{},
+		},
+	}
+
+	if score, ok := quotaScore(status, now); ok || score != 0 {
+		t.Fatalf("expected (0,false) when both windows are nil, got score=%v ok=%v", score, ok)
 	}
 }
 
