@@ -815,7 +815,7 @@ function App() {
                     />
                   </div>
                 </div>
-                {profile.secondarySummary && (
+                {profile.secondarySummary && profile.secondarySummary !== "-" && (
                   <div className="meter-block">
                     <div className="meter-label">
                       <span>Quota: WEEKLY</span>

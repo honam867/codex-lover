@@ -268,3 +268,39 @@ func TestSetProfileBlockedRejectsNonCodexProfile(t *testing.T) {
 		t.Fatalf("SetProfileBlocked error = %v", err)
 	}
 }
+
+// blockTestStatusWithWindows builds a ProfileStatus with independent 5h
+// (Primary) and weekly (Secondary) remaining percentages, for tests that
+// need to vary the two windows separately.
+func blockTestStatusWithWindows(id, home, authStatus string, primaryRemaining, secondaryRemaining float64, blocked bool) model.ProfileStatus {
+	status := blockTestStatus(id, home, authStatus, primaryRemaining, blocked)
+	status.State.Usage.Secondary = &model.UsageWindow{RemainingPercent: secondaryRemaining}
+	return status
+}
+
+func TestAutoRotateCodexPicksHigherFiveHourCandidateOnWeeklyTie(t *testing.T) {
+	svc, st, home := newBlockTestService(t)
+	cfg := store.DefaultConfig()
+	cfg.AutoRotateCodex = true
+	cfg.AutoRotateThreshold = 5
+	if err := st.SaveConfig(cfg); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	active := blockTestStatusWithWindows("active", home, model.AuthStatusActive, 10, 50, false)
+	lowerFiveHour := blockTestStatusWithWindows("lower-5h", home, model.AuthStatusLoggedOut, 20, 50, false)
+	higherFiveHour := blockTestStatusWithWindows("higher-5h", home, model.AuthStatusLoggedOut, 80, 50, false)
+	writeBlockTestCache(t, st, lowerFiveHour.Profile.ID, "lower-5h-auth")
+	writeBlockTestCache(t, st, higherFiveHour.Profile.ID, "higher-5h-auth")
+
+	result, err := svc.AutoRotateCodex([]model.ProfileStatus{active, lowerFiveHour, higherFiveHour})
+	if err != nil {
+		t.Fatalf("AutoRotateCodex: %v", err)
+	}
+	if !result.Changed || result.To.ID != higherFiveHour.Profile.ID {
+		t.Fatalf("expected switch to higher-5h candidate, got: %+v", result)
+	}
+	wantDiff := 80.0 - 10.0
+	if wantDiff <= cfg.AutoRotateThreshold {
+		t.Fatalf("test setup invalid: diff %v must exceed threshold %v", wantDiff, cfg.AutoRotateThreshold)
+	}
+}

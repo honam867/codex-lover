@@ -122,3 +122,41 @@ func TestQuotaScoreUsesMinOfBothWindows(t *testing.T) {
 		t.Fatalf("expected score=30 ok=true (min of both windows), got score=%v ok=%v", score, ok)
 	}
 }
+
+func TestQuotaScorePrimaryOnly(t *testing.T) {
+	now := time.Now()
+	status := model.ProfileStatus{
+		Profile: model.Profile{Tool: model.ToolCodex},
+		State: model.ProfileState{
+			AuthStatus: model.AuthStatusLoggedOut,
+			Usage: &model.UsageSnapshot{
+				Primary: &model.UsageWindow{
+					RemainingPercent: 60,
+				},
+			},
+		},
+	}
+
+	if score, ok := quotaScore(status, now); !ok || score != 60 {
+		t.Fatalf("expected score=60 ok=true when only primary (5h) window is present, got score=%v ok=%v", score, ok)
+	}
+}
+
+func TestQuotaScoreSecondaryOnly(t *testing.T) {
+	now := time.Now()
+	status := model.ProfileStatus{
+		Profile: model.Profile{Tool: model.ToolCodex},
+		State: model.ProfileState{
+			AuthStatus: model.AuthStatusLoggedOut,
+			Usage: &model.UsageSnapshot{
+				Secondary: &model.UsageWindow{
+					RemainingPercent: 30,
+				},
+			},
+		},
+	}
+
+	if score, ok := quotaScore(status, now); !ok || score != 30 {
+		t.Fatalf("expected score=30 ok=true when only secondary (weekly) window is present, got score=%v ok=%v", score, ok)
+	}
+}
