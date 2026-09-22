@@ -803,46 +803,31 @@ function App() {
               </div>
 
               <div className="card-usage space-y-5">
-                {profile.provider.toLowerCase() === "codex" ? (
+                <div className="meter-block">
+                  <div className="meter-label">
+                    <span>Quota: 5H</span>
+                    <span className="text-neon">{renderQuotaSummary(profile.primarySummary)}</span>
+                  </div>
+                  <div className="meter-track">
+                    <div
+                      className={clsx("meter-fill", meterTone(profile.primaryPercent))}
+                      style={{ width: `${profile.primaryPercent}%` }}
+                    />
+                  </div>
+                </div>
+                {profile.secondarySummary && (
                   <div className="meter-block">
                     <div className="meter-label">
                       <span>Quota: WEEKLY</span>
-                      <span className="text-neon">{renderQuotaSummary(profile.primarySummary)}</span>
+                      <span className="text-neon">{renderQuotaSummary(profile.secondarySummary)}</span>
                     </div>
                     <div className="meter-track">
                       <div
-                        className={clsx("meter-fill", meterTone(profile.primaryPercent))}
-                        style={{ width: `${profile.primaryPercent}%` }}
+                        className={clsx("meter-fill", meterTone(profile.secondaryPercent))}
+                        style={{ width: `${profile.secondaryPercent}%` }}
                       />
                     </div>
                   </div>
-                ) : (
-                  <>
-                    <div className="meter-block">
-                      <div className="meter-label">
-                        <span>Quota: 5H</span>
-                        <span className="text-neon">{renderQuotaSummary(profile.primarySummary)}</span>
-                      </div>
-                      <div className="meter-track">
-                        <div
-                          className={clsx("meter-fill", meterTone(profile.primaryPercent))}
-                          style={{ width: `${profile.primaryPercent}%` }}
-                        />
-                      </div>
-                    </div>
-                    <div className="meter-block">
-                      <div className="meter-label">
-                        <span>Quota: WEEKLY</span>
-                        <span className="text-neon">{renderQuotaSummary(profile.secondarySummary)}</span>
-                      </div>
-                      <div className="meter-track">
-                        <div
-                          className={clsx("meter-fill", meterTone(profile.secondaryPercent))}
-                          style={{ width: `${profile.secondaryPercent}%` }}
-                        />
-                      </div>
-                    </div>
-                  </>
                 )}
               </div>
 
@@ -1080,7 +1065,7 @@ function App() {
                 <div className="flex justify-between items-center">
                   <div>
                     <div className="font-bold text-sm">AUTO_TRIGGER (OPENAI ONLY)</div>
-                    <div className="text-[10px] text-dim">Open weekly quota window on a schedule</div>
+                    <div className="text-[10px] text-dim">Open 5H quota window on a schedule</div>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
                     <input
@@ -1143,7 +1128,7 @@ function App() {
                               return (
                                 <div key={id} className="trigger-preview-row">
                                   <span className="trigger-pick-name" title={p.label}>{p.label}</span>
-                                  <span className="trigger-pick-quota">WK {p.primaryPercent}%</span>
+                                  <span className="trigger-pick-quota">5H {p.primaryPercent}% · WK {p.secondaryPercent}%</span>
                                 </div>
                               );
                             })}
@@ -1162,7 +1147,7 @@ function App() {
                               onChange={() => toggleCustomProfile(p.id)}
                             />
                             <span className="trigger-pick-name" title={p.label}>{p.label}</span>
-                            <span className="trigger-pick-quota">WK {p.primaryPercent}%</span>
+                            <span className="trigger-pick-quota">5H {p.primaryPercent}% · WK {p.secondaryPercent}%</span>
                           </label>
                         ))}
                         {codexProfiles.length === 0 && (
