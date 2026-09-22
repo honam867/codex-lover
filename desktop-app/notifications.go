@@ -40,11 +40,7 @@ func (watcher *desktopWatchNotifications) collectThresholdEvents(statuses []mode
 		if status.State.AuthStatus != model.AuthStatusActive {
 			continue
 		}
-		primaryLabel := "5H"
-		if strings.EqualFold(strings.TrimSpace(status.Profile.Tool), model.ToolCodex) {
-			primaryLabel = "WEEKLY"
-		}
-		events = append(events, watcher.collectWindowThresholdEvents(status, primaryLabel, status.State.UsageWindowPrimary(), now)...)
+		events = append(events, watcher.collectWindowThresholdEvents(status, "5H", status.State.UsageWindowPrimary(), now)...)
 		events = append(events, watcher.collectWindowThresholdEvents(status, "WEEKLY", status.State.UsageWindowSecondary(), now)...)
 	}
 

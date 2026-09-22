@@ -69,7 +69,7 @@ func (t *windowsTray) onReady() {
 
 	t.accountItem = systray.AddMenuItem("Active: loading...", "")
 	t.accountItem.Disable()
-	t.resetItem = systray.AddMenuItem("Quota -", "")
+	t.resetItem = systray.AddMenuItem("5H - | W -", "")
 	t.resetItem.Disable()
 	systray.AddSeparator()
 	t.openItem = systray.AddMenuItem("Open", "Open account manager")
@@ -142,7 +142,7 @@ func (t *windowsTray) applyCachedState() {
 		account = "Active: loading..."
 	}
 	if resets == "" {
-		resets = "Quota -"
+		resets = "5H - | W -"
 	}
 	if tooltip == "" {
 		tooltip = "codex-lover"
@@ -180,18 +180,13 @@ func trayTextFromSnapshot(snapshot Snapshot) (string, string, string) {
 		}
 
 		accountLine := "Active: " + truncateRunes(label, 44)
-		resetPrimary := summaryResetValue(profile.PrimarySummary)
-		if strings.EqualFold(strings.TrimSpace(profile.Provider), "codex") {
-			resetLine := "Weekly " + resetPrimary
-			tooltip := truncateRunes(accountLine+" | Weekly "+resetPrimary, 120)
-			return accountLine, resetLine, tooltip
-		}
+		reset5h := summaryResetValue(profile.PrimarySummary)
 		resetWeekly := summaryResetValue(profile.SecondarySummary)
-		resetLine := "5H " + resetPrimary + " | W " + resetWeekly
-		tooltip := truncateRunes(accountLine+" | 5H "+resetPrimary+" | W "+resetWeekly, 120)
+		resetLine := "5H " + reset5h + " | W " + resetWeekly
+		tooltip := truncateRunes(accountLine+" | 5H "+reset5h+" | W "+resetWeekly, 120)
 		return accountLine, resetLine, tooltip
 	}
-	return "Active: none", "Quota -", "No active account"
+	return "Active: none", "5H - | W -", "No active account"
 }
 
 func summaryResetValue(summary string) string {
