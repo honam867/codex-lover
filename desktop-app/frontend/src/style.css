@@ -1366,3 +1366,177 @@ select:focus, input:focus {
 .account-card-clickable {
   cursor: pointer;
 }
+
+/* Card: reset credit count */
+.card-reset-count {
+  font-weight: 700;
+  color: var(--neon-green);
+}
+.card-reset-count-empty {
+  color: var(--text-dim);
+}
+.account-card.account-card-customer .card-reset-count {
+  color: #0b6b45;
+}
+.account-card.account-card-customer .card-reset-count-empty {
+  color: #5b6b70;
+}
+
+/* Account detail modal: tabs */
+.detail-modal {
+  width: min(600px, calc(100vw - 32px));
+  max-height: calc(100vh - 80px);
+  overflow-y: auto;
+}
+.detail-modal-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-transform: none;
+}
+.detail-tabs {
+  display: flex;
+  gap: 4px;
+  margin: -6px 0 22px;
+  border-bottom: 1px solid var(--border-dim);
+}
+.detail-tab {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  padding: 8px 14px;
+  color: var(--text-dim);
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.detail-tab:hover {
+  color: var(--text-primary);
+}
+.detail-tab-active {
+  color: var(--neon-cyan);
+  border-bottom-color: var(--neon-cyan);
+  text-shadow: var(--glow-text);
+}
+
+/* Reset credits panel: mirrors the OpenAI Codex usage settings section */
+.reset-panel {
+  font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #ececec;
+}
+.reset-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #ececec;
+}
+.reset-sub {
+  margin: 4px 0 14px;
+  font-size: 12px;
+  color: #b4b4b4;
+}
+.reset-notice {
+  margin-bottom: 12px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: rgba(16, 163, 127, 0.14);
+  border: 1px solid rgba(16, 163, 127, 0.4);
+  color: #7ee2c2;
+}
+.reset-notice-error {
+  background: rgba(255, 0, 85, 0.1);
+  border-color: rgba(255, 0, 85, 0.4);
+  color: #ff8fb0;
+}
+.reset-box {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 14px;
+  padding: 4px 16px;
+}
+.reset-tabs {
+  display: flex;
+  gap: 18px;
+  padding: 10px 4px 12px;
+}
+.reset-tab {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: #b4b4b4;
+  cursor: pointer;
+}
+.reset-tab:hover {
+  color: #ececec;
+}
+.reset-tab-active {
+  color: #ececec;
+  font-weight: 600;
+}
+.reset-tab-count {
+  margin-left: 2px;
+  font-weight: 400;
+  color: #b4b4b4;
+}
+.reset-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+}
+.reset-row-main {
+  min-width: 0;
+}
+.reset-row-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #ececec;
+}
+.reset-row-sub {
+  margin-top: 3px;
+  font-size: 11px;
+  color: #b4b4b4;
+}
+.reset-use-btn {
+  flex-shrink: 0;
+  background: #212121;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  color: #ececec;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.reset-use-btn:hover:not(:disabled) {
+  background: #2f2f2f;
+}
+.reset-use-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.reset-empty {
+  padding: 14px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  font-size: 12px;
+  color: #b4b4b4;
+}
+.reset-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #ff8fb0;
+}
