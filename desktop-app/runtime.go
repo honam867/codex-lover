@@ -68,7 +68,11 @@ func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.Refr
 	cfg, _ := a.svc.LoadConfig()
 	autoRotate := cfg.AutoRotateCodex
 
-	if autoRotate {
+	activeID, activeLimited := service.ActiveCodexLimitState(statuses)
+	holdActive, nextHold := manualHoldDecision(activeID, activeLimited, a.manualHoldProfileID)
+	a.manualHoldProfileID = nextHold
+
+	if autoRotate && !holdActive {
 		switchResult, err := a.svc.AutoSwitchLimitedCodex(statuses)
 		if err == nil && switchResult.Changed {
 			if emitNotifications {
@@ -102,6 +106,18 @@ func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.Refr
 		a.tray.Update(snapshot)
 	}
 	return snapshot, nil
+}
+
+// manualHoldDecision keeps a manually chosen Codex account active even when it is
+// limited: auto-switch is skipped while that account stays active and limited.
+// The hold is released once another account is active or the held one has quota
+// again, so a later limit-hit auto-switches as usual.
+// ponytail: in-memory only, an app restart drops the hold; persist it if that bites.
+func manualHoldDecision(activeID string, limited bool, hold string) (bool, string) {
+	if hold == "" || activeID != hold || !limited {
+		return false, ""
+	}
+	return true, hold
 }
 
 func (a *App) backgroundRefreshOptionsLocked() service.RefreshOptions {

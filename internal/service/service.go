@@ -1606,6 +1606,16 @@ func activeCodexStatus(statuses []model.ProfileStatus) (model.ProfileStatus, boo
 	return model.ProfileStatus{}, false
 }
 
+// ActiveCodexLimitState returns the active Codex profile ID ("" if none) and
+// whether it has reached its quota limit.
+func ActiveCodexLimitState(statuses []model.ProfileStatus) (string, bool) {
+	active, ok := activeCodexStatus(statuses)
+	if !ok {
+		return "", false
+	}
+	return active.Profile.ID, usageLimitReached(active)
+}
+
 func usageLimitReached(status model.ProfileStatus) bool {
 	if status.State.Usage == nil {
 		return false

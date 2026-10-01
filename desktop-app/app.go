@@ -91,6 +91,9 @@ type App struct {
 	hiddenToTray  bool
 	quitting      bool
 	usageSchedule providerUsageSchedule
+	// manualHoldProfileID is the Codex account the user switched to by hand;
+	// see manualHoldDecision.
+	manualHoldProfileID string
 }
 
 func NewApp() *App {
@@ -233,6 +236,10 @@ func (a *App) ActivateProfile(profileID string) ActionResponse {
 			Snapshot: a.mustSnapshotFallback(),
 		}
 	}
+	// A manual choice wins over auto-switch, even if this account is out of quota.
+	a.mu.Lock()
+	a.manualHoldProfileID = result.Profile.ID
+	a.mu.Unlock()
 	snapshot, err := a.snapshot(true)
 	if err != nil {
 		return ActionResponse{
