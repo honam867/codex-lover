@@ -14,10 +14,15 @@ import (
 )
 
 type usagePayload struct {
-	PlanType             string                `json:"plan_type"`
-	RateLimit            *rateLimitStatus      `json:"rate_limit"`
-	Credits              *creditStatus         `json:"credits"`
-	AdditionalRateLimits []additionalRateLimit `json:"additional_rate_limits"`
+	PlanType              string                `json:"plan_type"`
+	RateLimit             *rateLimitStatus      `json:"rate_limit"`
+	Credits               *creditStatus         `json:"credits"`
+	AdditionalRateLimits  []additionalRateLimit `json:"additional_rate_limits"`
+	RateLimitResetCredits *resetCreditsSummary  `json:"rate_limit_reset_credits"`
+}
+
+type resetCreditsSummary struct {
+	AvailableCount *int `json:"available_count"`
 }
 
 type rateLimitStatus struct {
@@ -268,6 +273,10 @@ func convertUsagePayload(payload *usagePayload) *model.UsageSnapshot {
 			limit.Secondary = toUsageWindow(item.RateLimit.SecondaryWindow)
 		}
 		snapshot.AdditionalLimits = append(snapshot.AdditionalLimits, limit)
+	}
+	if payload.RateLimitResetCredits != nil && payload.RateLimitResetCredits.AvailableCount != nil {
+		count := *payload.RateLimitResetCredits.AvailableCount
+		snapshot.ResetCreditsAvailable = &count
 	}
 	return snapshot
 }

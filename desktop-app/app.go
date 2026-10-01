@@ -57,6 +57,8 @@ type ProfileCard struct {
 	EndAtText           string `json:"endAtText"`
 	DaysRemainingText   string `json:"daysRemainingText"`
 	DaysUsedText        string `json:"daysUsedText"`
+	// ResetCreditsAvailable is the Codex reset credit count; nil = unknown or non-Codex.
+	ResetCreditsAvailable *int `json:"resetCreditsAvailable"`
 }
 
 type ActionResponse struct {
@@ -509,7 +511,11 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			canLoginFromCache = svc.HasCachedAuth(status.Profile.ID)
 		}
 		endAtText, daysRemainingText, daysUsedText := "", "", ""
+		var resetCreditsAvailable *int
 		if status.Profile.Tool == model.ToolCodex {
+			if status.State.Usage != nil {
+				resetCreditsAvailable = status.State.Usage.ResetCreditsAvailable
+			}
 			endAtText, daysRemainingText = codexAccountExpiryTexts(status.Profile.CreatedAt, now)
 			if codexShouldCountDaysUsed(status.State.HealthStatus, status.State.HealthMessage) {
 				daysUsedText = codexAccountDaysUsedText(status.Profile.CreatedAt, now)
@@ -548,6 +554,8 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 			EndAtText:           endAtText,
 			DaysRemainingText:   daysRemainingText,
 			DaysUsedText:        daysUsedText,
+
+			ResetCreditsAvailable: resetCreditsAvailable,
 		})
 	}
 	return Snapshot{

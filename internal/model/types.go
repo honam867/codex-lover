@@ -132,7 +132,9 @@ type UsageSnapshot struct {
 	Secondary        *UsageWindow      `json:"secondary,omitempty"`
 	Credits          *CreditsSnapshot  `json:"credits,omitempty"`
 	AdditionalLimits []AdditionalLimit `json:"additional_limits,omitempty"`
-	CapturedAt       time.Time         `json:"captured_at"`
+	// ResetCreditsAvailable is the Codex rate-limit reset credit count; nil = unknown.
+	ResetCreditsAvailable *int      `json:"reset_credits_available,omitempty"`
+	CapturedAt            time.Time `json:"captured_at"`
 }
 
 type UsageWindow struct {

@@ -725,6 +725,15 @@ func (s *Service) HasCachedAuth(profileID string) bool {
 }
 
 func (s *Service) RefreshLoggedOutCachedUsage(statuses []model.ProfileStatus) ([]model.ProfileStatus, int, error) {
+	return s.refreshLoggedOutCachedUsage(statuses, "")
+}
+
+// RefreshLoggedOutCachedUsageForProfile refreshes cached usage of one logged-out profile.
+func (s *Service) RefreshLoggedOutCachedUsageForProfile(statuses []model.ProfileStatus, profileID string) ([]model.ProfileStatus, int, error) {
+	return s.refreshLoggedOutCachedUsage(statuses, profileID)
+}
+
+func (s *Service) refreshLoggedOutCachedUsage(statuses []model.ProfileStatus, onlyProfileID string) ([]model.ProfileStatus, int, error) {
 	currentState, err := s.store.LoadState()
 	if err != nil {
 		return nil, 0, err
@@ -734,6 +743,9 @@ func (s *Service) RefreshLoggedOutCachedUsage(statuses []model.ProfileStatus) ([
 	refreshedCount := 0
 	for _, status := range statuses {
 		if status.State.AuthStatus != model.AuthStatusLoggedOut {
+			continue
+		}
+		if onlyProfileID != "" && status.Profile.ID != onlyProfileID {
 			continue
 		}
 		sourceProfileID, ok := s.cachedAuthSourceProfileID(status.Profile, profiles)

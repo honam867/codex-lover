@@ -42,6 +42,7 @@ import {
   UpdateProfileMeta,
 } from "../wailsjs/go/main/App";
 import clsx from "clsx";
+import { ResetCreditsPanel } from "./ResetCreditsPanel";
 
 type ProfileCard = {
   id: string;
@@ -76,6 +77,7 @@ type ProfileCard = {
   endAtText: string;
   daysRemainingText: string;
   daysUsedText: string;
+  resetCreditsAvailable?: number | null;
 };
 
 type Snapshot = {
@@ -205,6 +207,7 @@ function App() {
   const [newShopName, setNewShopName] = useState<string>("");
   const [showShopSuggestions, setShowShopSuggestions] = useState<boolean>(false);
   const [editProfile, setEditProfile] = useState<ProfileCard | null>(null);
+  const [detailTab, setDetailTab] = useState<"reset" | "info">("reset");
   const [editDate, setEditDate] = useState<string>("");
   const [editPrice, setEditPrice] = useState<number>(0);
   const [editAudience, setEditAudience] = useState<string>("personal");
@@ -466,6 +469,7 @@ function App() {
 
   function openEdit(profile: ProfileCard) {
     setEditProfile(profile);
+    setDetailTab("reset");
     setEditDate(profile.createdAtISO || "");
     setEditPrice(profile.price || 0);
     setEditAudience(normalizeAudience(profile.audience));
@@ -493,6 +497,11 @@ function App() {
     setPricePrompt(null);
     applyAction(result);
   }
+
+  // The modal keeps the clicked card; read live quota from the latest snapshot.
+  const liveEditProfile = editProfile
+    ? snapshot.profiles.find((p) => p.id === editProfile.id) ?? editProfile
+    : null;
 
   const providerOptions = useMemo(() => {
     return Array.from(new Set(snapshot.profiles.map((p) => p.provider || "unknown"))).sort();
@@ -832,8 +841,16 @@ function App() {
               </div>
 
               {profile.provider.toLowerCase() === "codex" &&
-                (profile.price > 0 || profile.shopName || profile.customerName || profile.createdAtText || profile.endAtText || healthResultVisible(profile)) && (
+                (hasResetCreditCount(profile) || profile.price > 0 || profile.shopName || profile.customerName || profile.createdAtText || profile.endAtText || healthResultVisible(profile)) && (
                   <div className="card-meta">
+                    {hasResetCreditCount(profile) && (
+                      <div className="card-meta-row">
+                        <span className="text-dim">Lượt đặt lại</span>
+                        <strong className={clsx("card-reset-count", !profile.resetCreditsAvailable && "card-reset-count-empty")}>
+                          {formatResetCreditCount(profile.resetCreditsAvailable)}
+                        </strong>
+                      </div>
+                    )}
                     {profile.price > 0 && (
                       <div className="card-meta-row">
                         <span className="text-dim">Giá</span>
@@ -1210,11 +1227,38 @@ function App() {
 
       {editProfile && (
         <div className="modal-overlay" onClick={() => setEditProfile(null)}>
-          <div className="modal-content" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-content detail-modal" onClick={(e) => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">Chỉnh sửa</h2>
+              <h2 className="modal-title detail-modal-title" title={editProfile.email}>{editProfile.label}</h2>
               <button className="modal-close" onClick={() => setEditProfile(null)}><X size={20} /></button>
             </div>
+            <div className="detail-tabs">
+              <button
+                type="button"
+                className={clsx("detail-tab", detailTab === "reset" && "detail-tab-active")}
+                onClick={() => setDetailTab("reset")}
+              >
+                Đặt lại
+              </button>
+              <button
+                type="button"
+                className={clsx("detail-tab", detailTab === "info" && "detail-tab-active")}
+                onClick={() => setDetailTab("info")}
+              >
+                Thông tin
+              </button>
+            </div>
+            {detailTab === "reset" && liveEditProfile && (
+              <ResetCreditsPanel
+                profileId={liveEditProfile.id}
+                profileLabel={liveEditProfile.label}
+                primaryPercent={liveEditProfile.primaryPercent}
+                secondaryPercent={liveEditProfile.secondaryPercent}
+                hasSecondary={Boolean(liveEditProfile.secondarySummary) && liveEditProfile.secondarySummary !== "-"}
+                onAction={(result) => applyAction(result as unknown as ActionResponse)}
+              />
+            )}
+            {detailTab === "info" && (
             <div className="modal-form">
               <div className="modal-field-row">
                 <div className="modal-field">
@@ -1334,6 +1378,7 @@ function App() {
                 LƯU
               </button>
             </div>
+            )}
           </div>
         </div>
       )}
@@ -1531,6 +1576,12 @@ const healthTextClass = (status: string) => {
 
 const healthResultVisible = (profile: ProfileCard): boolean =>
   Boolean(profile.healthLabel && profile.healthCheckedAtText && profile.healthCheckedAtText !== "-");
+
+const hasResetCreditCount = (profile: ProfileCard): boolean =>
+  typeof profile.resetCreditsAvailable === "number";
+
+const formatResetCreditCount = (count: number | null | undefined): string =>
+  count && count > 0 ? `Còn ${count}` : "Hết";
 
 const normalizeAudience = (value: string) => value.toLowerCase() === "customer" ? "customer" : "personal";
 
