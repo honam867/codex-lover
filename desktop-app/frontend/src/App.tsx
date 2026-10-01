@@ -6,6 +6,7 @@ import {
   Activity,
   Ban,
   Check,
+  ChevronDown,
   Cpu,
   FileSpreadsheet,
   LayoutDashboard,
@@ -13,6 +14,7 @@ import {
   RefreshCw,
   Settings,
   ShieldCheck,
+  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react";
@@ -186,6 +188,7 @@ function App() {
   const [providerFilters, setProviderFilters] = useState<string[]>([]);
   const [shopFilters, setShopFilters] = useState<string[]>([]);
   const [openFilterMenu, setOpenFilterMenu] = useState<FilterMenuKey | "">("");
+  const [showFilterPanel, setShowFilterPanel] = useState<boolean>(false);
   const [audienceSort, setAudienceSort] = useState<AudienceSort>("");
   const [monthSort, setMonthSort] = useState<MonthSort>("");
   const [healthSort, setHealthSort] = useState<HealthSort>("");
@@ -578,6 +581,13 @@ function App() {
   const checkingProfileCount = checkingProfiles.length;
   const hasActiveFilters = audienceFilters.length > 0 || healthFilters.length > 0 || providerFilters.length > 0 || shopFilters.length > 0;
   const hasActiveSorts = Boolean(audienceSort || monthSort || healthSort || priceSort);
+  const activeFilterSortCount =
+    audienceFilters.length + healthFilters.length + providerFilters.length + shopFilters.length +
+    [audienceSort, monthSort, healthSort, priceSort].filter(Boolean).length;
+  const toggleFilterPanel = () => {
+    setOpenFilterMenu("");
+    setShowFilterPanel((current) => !current);
+  };
   const toggleFilterMenu = (menu: FilterMenuKey) => setOpenFilterMenu((current) => current === menu ? "" : menu);
   const clearAllFilterSort = () => {
     setAudienceFilters([]);
@@ -689,7 +699,19 @@ function App() {
                 <span className="zoom-readout">{Math.round(zoomLevel * 100)}%</span>
                 <button onClick={() => setZoomIndex((value) => Math.min(ZOOM_LEVELS.length - 1, value + 1))} className="control-chip" disabled={zoomIndex === ZOOM_LEVELS.length - 1}>+</button>
               </div>
+              <button
+                type="button"
+                onClick={toggleFilterPanel}
+                className={clsx("control-chip filter-panel-toggle", showFilterPanel && "active")}
+                aria-expanded={showFilterPanel}
+              >
+                <SlidersHorizontal size={12} />
+                FILTER / SORT
+                {activeFilterSortCount > 0 && <span className="filter-panel-count">{activeFilterSortCount}</span>}
+                <ChevronDown size={12} className={clsx("filter-panel-chevron", showFilterPanel && "open")} />
+              </button>
             </div>
+            {showFilterPanel && (
             <div className="toolbar-right">
               <div className="filter-sort-row">
                 <span className="filter-sort-label">FILTER</span>
@@ -750,6 +772,7 @@ function App() {
                 </select>
               </div>
             </div>
+            )}
           </div>
           {(hasActiveFilters || hasActiveSorts) && (
             <div className="active-filter-tags">

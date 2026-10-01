@@ -1540,3 +1540,32 @@ select:focus, input:focus {
   gap: 12px;
   color: #ff8fb0;
 }
+
+/* Toolbar: collapsible filter/sort panel */
+.filter-panel-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+}
+.filter-panel-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--neon-cyan);
+  color: #05070d;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  text-align: center;
+}
+.filter-panel-chevron {
+  transition: transform 0.15s ease;
+}
+.filter-panel-chevron.open {
+  transform: rotate(180deg);
+}
+.filter-panel-toggle.active .filter-panel-count {
+  background: var(--bg-deep);
+  color: var(--neon-cyan);
+}
