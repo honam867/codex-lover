@@ -68,7 +68,9 @@ func TestTriggerWindowAllModelsRejected(t *testing.T) {
 	}
 }
 
-func TestTriggerHealthProbeUsesOnlyCheapestModel(t *testing.T) {
+// gpt-5.4-mini and gpt-5.4 are now rejected with 400 for ChatGPT-account Codex,
+// which made every health probe report Dead.
+func TestTriggerHealthProbeUsesSingleSupportedModel(t *testing.T) {
 	var seenModels []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var payload map[string]any
@@ -88,13 +90,14 @@ func TestTriggerHealthProbeUsesOnlyCheapestModel(t *testing.T) {
 	auth := &ProfileAuth{AccessToken: "tok", AccountID: "a"}
 	_, _, err := TriggerHealthProbe(auth)
 	if err == nil {
-		t.Fatalf("expected error when cheapest health model is rejected")
+		t.Fatalf("expected error when the health model is rejected")
 	}
+	// One model only: a fallback would mask a 429 (limited) behind a later 400.
 	if len(seenModels) != 1 {
 		t.Fatalf("health probe tried %d models (%v), want exactly 1", len(seenModels), seenModels)
 	}
-	if seenModels[0] != "gpt-5.4-mini" {
-		t.Fatalf("health probe model = %q, want gpt-5.4-mini", seenModels[0])
+	if seenModels[0] != "gpt-5.5" {
+		t.Fatalf("health probe model = %q, want gpt-5.5", seenModels[0])
 	}
 }
 

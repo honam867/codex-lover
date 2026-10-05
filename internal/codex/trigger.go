@@ -18,12 +18,13 @@ var (
 	// DefaultTriggerModels is the cheapest-first preference order for
 	// ChatGPT-account Codex, confirmed by the Phase 0 live probe. Only these
 	// models are accepted on the /responses endpoint for a ChatGPT account.
-	DefaultTriggerModels = []string{"gpt-5.4-mini", "gpt-5.5", "gpt-5.4"}
+	// As of 2026-10, gpt-5.4-mini and gpt-5.4 are rejected (400) for ChatGPT
+	// accounts, so gpt-5.5 goes first; the rest stay as fallbacks.
+	DefaultTriggerModels = []string{"gpt-5.5", "gpt-5.4-mini", "gpt-5.4"}
 
-	// DefaultHealthProbeModels deliberately uses only the cheapest accepted model.
-	// Health checks only need to verify auth/account liveness, not open quota by
-	// falling back to more expensive models.
-	DefaultHealthProbeModels = []string{"gpt-5.4-mini"}
+	// DefaultHealthProbeModels deliberately uses a single accepted model: a
+	// fallback would turn a 429 (limited) into a later model's 400 (Dead).
+	DefaultHealthProbeModels = []string{"gpt-5.5"}
 )
 
 // TriggerResult reports the outcome of a successful trigger.
