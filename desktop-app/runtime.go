@@ -19,6 +19,9 @@ func (a *App) runBackgroundLoops() {
 
 	a.mu.Lock()
 	_, _ = a.refreshLockedWithOptions(true, service.RefreshOptions{})
+	// Logged-out cards (usage, reset credit count) would otherwise stay empty
+	// until the first 15-minute tick.
+	_ = a.refreshLoggedOutLocked()
 	a.mu.Unlock()
 
 	refreshTicker := time.NewTicker(15 * time.Second)

@@ -161,6 +161,13 @@ func (a *App) RefreshSnapshot() ActionResponse {
 			Snapshot: a.mustSnapshotFallback(),
 		}
 	}
+	// Sync All also refreshes logged-out accounts so their quota and reset
+	// credit count update without opening each card.
+	a.mu.Lock()
+	if err := a.refreshLoggedOutLocked(); err == nil {
+		snapshot = a.lastSnapshot
+	}
+	a.mu.Unlock()
 	return ActionResponse{
 		Message:  "Refreshed",
 		Snapshot: snapshot,
