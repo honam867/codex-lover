@@ -280,7 +280,25 @@ func (s *Store) saveJSONUnlocked(path string, value any) error {
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", path, err)
 	}
-	return os.WriteFile(path, data, 0o644)
+	// Atomic write: concurrent in-place WriteFile calls left trailing bytes and corrupted the JSON.
+	tmp, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".*.tmp")
+	if err != nil {
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		os.Remove(tmp.Name())
+		return err
+	}
+	return nil
 }
 
 func authStatusRank(value string) int {
