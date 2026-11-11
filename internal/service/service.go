@@ -308,9 +308,13 @@ func (s *Service) RefreshAllWithOptions(opts RefreshOptions) ([]model.ProfileSta
 					state.LastError = ""
 				}
 			} else {
+				// Clear errors left from when it was active; keep the cached-usage
+				// error of an account that was already logged out.
+				if state.AuthStatus != model.AuthStatusLoggedOut {
+					state.LastError = ""
+				}
 				state.AuthStatus = model.AuthStatusLoggedOut
 				state.LastSeenLoggedOutAt = &now
-				state.LastError = ""
 			}
 			if err := s.store.UpdateProfileState(profile.ID, state); err != nil {
 				return nil, err
@@ -388,9 +392,13 @@ func (s *Service) RefreshAllWithOptions(opts RefreshOptions) ([]model.ProfileSta
 					state.LastError = ""
 				}
 			} else {
+				// Clear errors left from when it was active; keep the cached-usage
+				// error of an account that was already logged out.
+				if state.AuthStatus != model.AuthStatusLoggedOut {
+					state.LastError = ""
+				}
 				state.AuthStatus = model.AuthStatusLoggedOut
 				state.LastSeenLoggedOutAt = &now
-				state.LastError = ""
 			}
 			if err := s.store.UpdateProfileState(profile.ID, state); err != nil {
 				return nil, err
@@ -468,9 +476,13 @@ func (s *Service) RefreshAllWithOptions(opts RefreshOptions) ([]model.ProfileSta
 					state.LastError = ""
 				}
 			} else {
+				// Clear errors left from when it was active; keep the cached-usage
+				// error of an account that was already logged out.
+				if state.AuthStatus != model.AuthStatusLoggedOut {
+					state.LastError = ""
+				}
 				state.AuthStatus = model.AuthStatusLoggedOut
 				state.LastSeenLoggedOutAt = &now
-				state.LastError = ""
 			}
 			if err := s.store.UpdateProfileState(profile.ID, state); err != nil {
 				return nil, err
@@ -755,6 +767,15 @@ func (s *Service) refreshLoggedOutCachedUsage(statuses []model.ProfileStatus, on
 
 		usage, auth, err := s.fetchUsageFromCachedAuthByTool(status.Profile.Tool, sourceProfileID)
 		if err != nil {
+			// Record the failure: silently keeping old usage let an expired
+			// login show as a full account (reset inferred from stale data).
+			now := time.Now().UTC()
+			state := hydrateProfileState(currentState.Profiles[status.Profile.ID], status.Profile.ID, now)
+			state.LastError = cachedUsageErrorLabel(err)
+			if err := s.store.UpdateProfileState(status.Profile.ID, state); err != nil {
+				return nil, refreshedCount, err
+			}
+			currentState.Profiles[status.Profile.ID] = state
 			continue
 		}
 
@@ -787,6 +808,15 @@ func (s *Service) refreshLoggedOutCachedUsage(statuses []model.ProfileStatus, on
 		return nil, refreshedCount, err
 	}
 	return updatedStatuses, refreshedCount, nil
+}
+
+// cachedUsageErrorLabel turns a cached usage fetch error into a short card label.
+func cachedUsageErrorLabel(err error) string {
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "refresh_token") || strings.Contains(msg, "unauthorized") || strings.Contains(msg, "401") {
+		return "LOGIN EXPIRED"
+	}
+	return "USAGE ERROR"
 }
 
 func (s *Service) cachedAuthSourceProfileID(profile model.Profile, profiles []model.Profile) (string, bool) {
@@ -1650,7 +1680,8 @@ func windowLimitReached(window *model.UsageWindow) bool {
 }
 
 func quotaScore(status model.ProfileStatus, now time.Time) (float64, bool) {
-	if status.State.Usage == nil {
+	// Usage that failed to refresh is unknown, never a switch target.
+	if status.State.Usage == nil || status.State.LastError != "" {
 		return 0, false
 	}
 	primary := EffectiveWindowForDisplay(status.State.Usage.Primary, status.State.AuthStatus, now)

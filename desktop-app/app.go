@@ -524,8 +524,13 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 	now := time.Now()
 	profiles := make([]ProfileCard, 0, len(statuses))
 	for _, status := range statuses {
-		primary := service.EffectiveWindowForDisplay(status.State.UsageWindowPrimary(), status.State.AuthStatus, now)
-		secondary := service.EffectiveWindowForDisplay(status.State.UsageWindowSecondary(), status.State.AuthStatus, now)
+		// Only infer a quota reset from usage that is still refreshing fine.
+		displayAuth := status.State.AuthStatus
+		if status.State.LastError != "" {
+			displayAuth = model.AuthStatusError
+		}
+		primary := service.EffectiveWindowForDisplay(status.State.UsageWindowPrimary(), displayAuth, now)
+		secondary := service.EffectiveWindowForDisplay(status.State.UsageWindowSecondary(), displayAuth, now)
 		canLoginFromCache := false
 		if svc != nil && status.State.AuthStatus != model.AuthStatusActive {
 			canLoginFromCache = svc.HasCachedAuth(status.Profile.ID)

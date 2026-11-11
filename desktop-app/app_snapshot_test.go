@@ -160,3 +160,23 @@ func TestCodexAccountDaysUsedText(t *testing.T) {
 		t.Fatalf("days used = %q, want đã dùng 8 ngày", got)
 	}
 }
+
+// An expired login keeps yesterday's 0% usage; it must not be drawn as a full
+// reset just because the stored reset time has passed.
+func TestBuildSnapshotNoInferredResetWhenUsageRefreshFailed(t *testing.T) {
+	past := time.Now().Add(-time.Hour)
+	status := model.ProfileStatus{
+		Profile: model.Profile{ID: "codex-a", Tool: model.ToolCodex, Provider: model.ToolCodex},
+		State: model.ProfileState{
+			AuthStatus: model.AuthStatusLoggedOut,
+			Usage:      &model.UsageSnapshot{Primary: &model.UsageWindow{UsedPercent: 100, ResetsAt: &past}},
+		},
+	}
+	if got := buildSnapshot([]model.ProfileStatus{status}, nil).Profiles[0].PrimaryPercent; got != 100 {
+		t.Fatalf("healthy logged-out account should infer reset, got %d", got)
+	}
+	status.State.LastError = "LOGIN EXPIRED"
+	if got := buildSnapshot([]model.ProfileStatus{status}, nil).Profiles[0].PrimaryPercent; got != 0 {
+		t.Fatalf("failed refresh must show stored 0%%, got %d", got)
+	}
+}

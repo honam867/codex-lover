@@ -935,6 +935,9 @@ function App() {
                   {profile.provider.toLowerCase() === "codex" && profile.blocked && (
                     <span className="blocked-badge">BLOCKED</span>
                   )}
+                  {profile.lastError && profile.lastError !== "-" && (
+                    <span className="health-badge" title={profile.lastError}>{profile.lastError.slice(0, 24)}</span>
+                  )}
                   {profile.provider.toLowerCase() === "codex" && isHealthy(profile.healthStatus) && (
                     <span className="health-badge-ok">CHECK OK</span>
                   )}
