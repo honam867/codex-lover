@@ -76,6 +76,14 @@ func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.Refr
 	a.manualHoldProfileID = nextHold
 
 	if autoRotate && !holdActive {
+		// Pick the next account from fresh quota, not 15-minute-old data:
+		// stale numbers made it hop to accounts that were already out.
+		if activeLimited && time.Since(a.lastCandidateRefresh) >= time.Minute {
+			a.lastCandidateRefresh = time.Now()
+			if fresh, _, err := a.svc.RefreshLoggedOutCachedUsage(statuses); err == nil {
+				statuses = fresh
+			}
+		}
 		switchResult, err := a.svc.AutoSwitchLimitedCodex(statuses)
 		if err == nil && switchResult.Changed {
 			if emitNotifications {

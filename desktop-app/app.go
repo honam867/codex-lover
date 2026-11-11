@@ -94,6 +94,8 @@ type App struct {
 	// manualHoldProfileID is the Codex account the user switched to by hand;
 	// see manualHoldDecision.
 	manualHoldProfileID string
+	// lastCandidateRefresh throttles the quota refresh done before an auto-switch.
+	lastCandidateRefresh time.Time
 }
 
 func NewApp() *App {
@@ -235,7 +237,11 @@ func (a *App) ActivateProfile(profileID string) ActionResponse {
 			Snapshot: a.mustSnapshotFallback(),
 		}
 	}
+	// Hold the lock: a background refresh running while the home auth is
+	// swapped would cache the new account's tokens under the old profile.
+	a.mu.Lock()
 	result, err := a.svc.ActivateProfile(profileID)
+	a.mu.Unlock()
 	if err != nil {
 		return ActionResponse{
 			Message:  "Activate failed",

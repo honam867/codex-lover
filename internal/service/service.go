@@ -108,7 +108,7 @@ func (s *Service) AddManagedCodexAccount(loginHomePath string) (model.Profile, e
 	if err := s.store.UpsertProfile(profile); err != nil {
 		return model.Profile{}, err
 	}
-	if err := codex.CacheHomeAuth(s.codexAuthCacheRoot(), profile.ID, loginHomePath); err != nil {
+	if err := codex.CacheHomeAuth(s.codexAuthCacheRoot(), profile.ID, loginHomePath, "", ""); err != nil {
 		return model.Profile{}, err
 	}
 	if err := s.removeManagedCodexHome(loginHomePath); err != nil {
@@ -318,7 +318,7 @@ func (s *Service) RefreshAllWithOptions(opts RefreshOptions) ([]model.ProfileSta
 			currentState.Profiles[profile.ID] = state
 		}
 		if !skipUsage && usageErr == nil {
-			_ = codex.CacheHomeAuth(s.codexAuthCacheRoot(), activeProfile.ID, activeProfile.HomePath)
+			_ = codex.CacheHomeAuth(s.codexAuthCacheRoot(), activeProfile.ID, activeProfile.HomePath, auth.AccountID, auth.Email)
 		}
 	}
 
@@ -790,7 +790,7 @@ func (s *Service) refreshLoggedOutCachedUsage(statuses []model.ProfileStatus, on
 }
 
 func (s *Service) cachedAuthSourceProfileID(profile model.Profile, profiles []model.Profile) (string, bool) {
-	if s.hasCachedAuthForProfile(profile.ID, profile.Tool) {
+	if s.cacheUsable(profile, profile.ID) {
 		return profile.ID, true
 	}
 	for _, candidate := range profiles {
@@ -800,7 +800,7 @@ func (s *Service) cachedAuthSourceProfileID(profile model.Profile, profiles []mo
 		if !profilesRepresentSameAccount(profile, candidate) {
 			continue
 		}
-		if s.hasCachedAuthForProfile(candidate.ID, candidate.Tool) {
+		if s.cacheUsable(profile, candidate.ID) {
 			return candidate.ID, true
 		}
 	}
@@ -846,7 +846,7 @@ func (s *Service) AutoRotateCodex(statuses []model.ProfileStatus) (SwitchResult,
 		if status.Profile.Tool != model.ToolCodex || status.Profile.Blocked {
 			continue
 		}
-		if !codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), status.Profile.ID) {
+		if !s.cacheUsable(status.Profile, status.Profile.ID) {
 			continue
 		}
 		if weeklyRemaining(status) <= 0.5 {
@@ -947,7 +947,7 @@ func (s *Service) bestSwitchCandidate(statuses []model.ProfileStatus, active mod
 		if status.Profile.HomePath != active.Profile.HomePath {
 			continue
 		}
-		if !codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), status.Profile.ID) {
+		if !s.cacheUsable(status.Profile, status.Profile.ID) {
 			continue
 		}
 		score, ok := quotaScore(status, now)
@@ -1041,7 +1041,7 @@ func (s *Service) normalizeManagedCodexProfiles() error {
 		}
 		authPath := filepath.Join(oldHomePath, "auth.json")
 		if _, err := os.Stat(authPath); err == nil {
-			_ = codex.CacheHomeAuth(s.codexAuthCacheRoot(), profile.ID, oldHomePath)
+			_ = codex.CacheHomeAuth(s.codexAuthCacheRoot(), profile.ID, oldHomePath, profile.AccountID, profile.Email)
 		}
 		profile.HomePath = runtimeHome
 		profile.UpdatedAt = now
@@ -1501,6 +1501,28 @@ func (s *Service) hasCachedAuthForProfile(profileID string, tool string) bool {
 	default:
 		return codex.HasCachedHomeAuth(s.codexAuthCacheRoot(), profileID) || claude.HasCachedHomeAuth(s.claudeAuthCacheRoot(), profileID) || kimi.HasCachedHomeAuth(s.kimiAuthCacheRoot(), profileID)
 	}
+}
+
+// cacheUsable reports whether cacheProfileID's cached auth exists and really
+// belongs to profile. A Codex cache holding another account's tokens is
+// quarantined: restoring it would log in the wrong account and its usage would
+// show on the wrong card.
+func (s *Service) cacheUsable(profile model.Profile, cacheProfileID string) bool {
+	if !s.hasCachedAuthForProfile(cacheProfileID, profile.Tool) {
+		return false
+	}
+	if profile.Tool != model.ToolCodex {
+		return true
+	}
+	auth, err := codex.LoadCachedProfileAuth(s.codexAuthCacheRoot(), cacheProfileID)
+	if err != nil {
+		return true // unreadable is reported where it is used
+	}
+	if codex.SameIdentity(auth.AccountID, auth.Email, profile.AccountID, profile.Email) {
+		return true
+	}
+	_ = codex.QuarantineCachedAuth(s.codexAuthCacheRoot(), cacheProfileID)
+	return false
 }
 
 func (s *Service) restoreCachedAuthByTool(tool string, profileID string, homePath string) error {

@@ -99,7 +99,7 @@ func (s *Service) persistResetAuth(target resetAuthTarget, refreshed *codex.Auth
 	if err := codex.PersistRefreshedAuthAtPath(codex.HomeAuthPath(target.HomePath), refreshed); err != nil {
 		return err
 	}
-	return codex.CacheHomeAuth(s.codexAuthCacheRoot(), target.ProfileID, target.HomePath)
+	return codex.CacheHomeAuth(s.codexAuthCacheRoot(), target.ProfileID, target.HomePath, target.AccountID, target.Email)
 }
 
 // ListCodexResetCredits fetches available credits and the redeem history. A

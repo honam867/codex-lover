@@ -12,12 +12,25 @@ import (
 	"codex-lover/internal/model"
 )
 
-func CacheHomeAuth(cacheRoot string, profileID string, homePath string) error {
+// CacheHomeAuth copies the home auth.json into profileID's cache. When an
+// expected account ID or email is given, the copy is refused if the home file
+// now holds a different account (it was switched while we were working), so
+// one profile's cache never ends up with another account's tokens.
+func CacheHomeAuth(cacheRoot string, profileID string, homePath string, expectAccountID string, expectEmail string) error {
 	source := filepath.Join(homePath, authFileName)
 	target := cachedAuthPath(cacheRoot, profileID)
 	data, err := os.ReadFile(source)
 	if err != nil {
 		return fmt.Errorf("read Codex auth for cache: %w", err)
+	}
+	if expectAccountID != "" || expectEmail != "" {
+		accountID, email, err := authIdentity(data)
+		if err != nil {
+			return err
+		}
+		if !SameIdentity(accountID, email, expectAccountID, expectEmail) {
+			return fmt.Errorf("home Codex auth belongs to %s, not %s; cache not updated", email, expectEmail)
+		}
 	}
 	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return fmt.Errorf("create Codex auth cache dir: %w", err)
@@ -26,6 +39,41 @@ func CacheHomeAuth(cacheRoot string, profileID string, homePath string) error {
 		return fmt.Errorf("write Codex auth cache: %w", err)
 	}
 	return nil
+}
+
+func authIdentity(data []byte) (string, string, error) {
+	var authFile AuthFile
+	if err := json.Unmarshal(data, &authFile); err != nil {
+		return "", "", fmt.Errorf("parse Codex auth: %w", err)
+	}
+	if authFile.Tokens == nil {
+		return "", "", fmt.Errorf("Codex auth has no tokens")
+	}
+	claims, err := ParseIDClaims(authFile.Tokens.IDToken)
+	if err != nil {
+		return "", "", err
+	}
+	return chooseNonEmpty(authFile.Tokens.AccountID, claims.ChatGPTAccountID), claims.Email, nil
+}
+
+// SameIdentity reports whether two (accountID, email) pairs name the same
+// account. Unknown (empty) values on either side are treated as a match.
+func SameIdentity(accountID, email, expectAccountID, expectEmail string) bool {
+	// Email first: team workspaces share one account ID across several users.
+	if email != "" && expectEmail != "" {
+		return strings.EqualFold(email, expectEmail)
+	}
+	if accountID != "" && expectAccountID != "" {
+		return strings.EqualFold(accountID, expectAccountID)
+	}
+	return true
+}
+
+// QuarantineCachedAuth renames a bad cache file out of the way so it is no
+// longer used, keeping it on disk for manual recovery.
+func QuarantineCachedAuth(cacheRoot string, profileID string) error {
+	path := cachedAuthPath(cacheRoot, profileID)
+	return os.Rename(path, path+".mismatch-"+time.Now().Format("20060102-150405"))
 }
 
 func HasCachedHomeAuth(cacheRoot string, profileID string) bool {
