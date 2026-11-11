@@ -289,8 +289,9 @@ func toUsageWindow(raw *rateLimitWindowRaw) *model.UsageWindow {
 	remaining := 100.0 - used
 	windowMinutes := raw.LimitWindowSeconds / 60
 	var resetsAt *time.Time
-	if raw.ResetAt > 0 {
-		value := time.Unix(int64(raw.ResetAt), 0).UTC()
+	// The API can report an exhausted window whose reset_at is already past.
+	// Keeping that time made the app assume a reset and show the account as full.
+	if value := time.Unix(int64(raw.ResetAt), 0).UTC(); raw.ResetAt > 0 && value.After(time.Now()) {
 		resetsAt = &value
 	}
 	return &model.UsageWindow{

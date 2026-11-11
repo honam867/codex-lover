@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func writeHomeAuth(t *testing.T, home, email, accountID string) {
@@ -39,4 +40,15 @@ func TestCacheHomeAuthRefusesOtherAccount(t *testing.T) {
 		return
 	}
 	t.Fatal("same team account ID with different emails must not match")
+}
+
+func TestToUsageWindowDropsPastResetTime(t *testing.T) {
+	past := &rateLimitWindowRaw{UsedPercent: 100, ResetAt: int(time.Now().Add(-time.Hour).Unix())}
+	if w := toUsageWindow(past); w.ResetsAt != nil || w.RemainingPercent != 0 {
+		t.Fatalf("past reset must be dropped so 0%% is not shown as full: %+v", w)
+	}
+	future := &rateLimitWindowRaw{UsedPercent: 10, ResetAt: int(time.Now().Add(time.Hour).Unix())}
+	if w := toUsageWindow(future); w.ResetsAt == nil {
+		t.Fatal("future reset must be kept")
+	}
 }
