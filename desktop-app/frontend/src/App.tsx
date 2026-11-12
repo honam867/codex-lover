@@ -69,6 +69,7 @@ type ProfileCard = {
   secondaryPercent: number;
   secondarySummary: string;
   lastError: string;
+  outOfQuota: boolean;
   canLoginFromCache: boolean;
   lastRefreshedAtText: string;
   createdAtText: string;
@@ -573,7 +574,7 @@ function App() {
       ? filtered
       : [...filtered].sort((a, b) => compareProfiles(a, b, { audienceSort, monthSort, healthSort, priceSort }));
     // Usable accounts first; stable sort keeps the chosen order inside each group.
-    return [...sorted].sort((a, b) => Number(isOutOfQuota(a)) - Number(isOutOfQuota(b)));
+    return [...sorted].sort((a, b) => Number(a.outOfQuota) - Number(b.outOfQuota));
   }, [audienceFilters, audienceSort, healthFilters, healthSort, monthSort, priceSort, providerFilter, providerFilters, shopFilters, snapshot.profiles]);
 
   const codexProfiles = useMemo(
@@ -1713,13 +1714,6 @@ const normalizeHealth = (value: string): HealthFilter => {
 
 const audienceLabel = (value: AudienceValue): string =>
   value === "customer" ? "Khách hàng" : "Cá nhân";
-
-// Out of quota (5h or weekly at 0%) or failing to refresh: listed after usable accounts.
-const isOutOfQuota = (profile: ProfileCard): boolean => {
-  if (profile.lastError && profile.lastError !== "-") return true;
-  const empty = (percent: number, summary: string) => Boolean(summary) && summary !== "-" && percent <= 0;
-  return empty(profile.primaryPercent, profile.primarySummary) || empty(profile.secondaryPercent, profile.secondarySummary);
-};
 
 const healthLabel = (value: HealthFilter): string => {
   switch (value) {

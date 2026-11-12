@@ -69,14 +69,15 @@ func runWidget(app *App, widget *Widget) error {
 	}
 	widget.store = st
 	return wails.Run(&options.App{
-		Title:            "codex-lover quota",
+		Title:            widgetTitle,
 		Width:            300,
 		Height:           150,
-		DisableResize:    true,
+		MinWidth:         220,
+		MaxWidth:         640,
 		Frameless:        true,
 		AlwaysOnTop:      true,
 		AssetServer:      &assetserver.Options{Assets: assets},
-		BackgroundColour: &options.RGBA{R: 0, G: 0, B: 0, A: 0},
+		BackgroundColour: &options.RGBA{R: 8, G: 10, B: 16, A: 255},
 		OnStartup:        widget.startup,
 		Bind:             []any{app, widget},
 		SingleInstanceLock: &options.SingleInstanceLock{
@@ -84,12 +85,11 @@ func runWidget(app *App, widget *Widget) error {
 		},
 		Windows: &windowsopts.Options{
 			// Separate WebView2 profile: two processes cannot share one data folder.
-			WebviewUserDataPath:  widgetWebviewDataPath(),
-			DisablePinchZoom:     true,
-			WebviewIsTransparent: true,
-			WindowIsTranslucent:  true,
-			BackdropType:         windowsopts.Acrylic,
-			Theme:                windowsopts.Dark,
+			WebviewUserDataPath: widgetWebviewDataPath(),
+			DisablePinchZoom:    true,
+			// See-through comes from window opacity (setWindowOpacity), not
+			// WebView transparency; frame decorations give Windows 11 rounded corners.
+			Theme: windowsopts.Dark,
 		},
 	})
 }

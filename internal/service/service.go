@@ -948,7 +948,16 @@ func (s *Service) AutoSwitchLimitedCodex(statuses []model.ProfileStatus) (Switch
 	if !usageLimitReached(active) {
 		return SwitchResult{Checked: true, From: active.Profile, Reason: "active account still has quota"}, nil
 	}
+	return s.SwitchToBestCodex(statuses)
+}
 
+// SwitchToBestCodex switches the active Codex home to the account with the most
+// quota left, whether or not the active one is exhausted.
+func (s *Service) SwitchToBestCodex(statuses []model.ProfileStatus) (SwitchResult, error) {
+	active, ok := activeCodexStatus(statuses)
+	if !ok {
+		return SwitchResult{Checked: true, Reason: "no active Codex account"}, nil
+	}
 	candidate, ok := s.bestSwitchCandidate(statuses, active)
 	if !ok {
 		return SwitchResult{Checked: true, From: active.Profile, Reason: "no cached ready account"}, nil
@@ -961,7 +970,7 @@ func (s *Service) AutoSwitchLimitedCodex(statuses []model.ProfileStatus) (Switch
 		Changed: true,
 		From:    active.Profile,
 		To:      candidate.Profile,
-		Reason:  "active account reached limit",
+		Reason:  "switched to the account with the most quota left",
 	}, nil
 }
 

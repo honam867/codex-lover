@@ -180,3 +180,24 @@ func TestBuildSnapshotNoInferredResetWhenUsageRefreshFailed(t *testing.T) {
 		t.Fatalf("failed refresh must show stored 0%%, got %d", got)
 	}
 }
+
+func TestBuildSnapshotOutOfQuota(t *testing.T) {
+	future := time.Now().Add(time.Hour)
+	card := func(state model.ProfileState) ProfileCard {
+		return buildSnapshot([]model.ProfileStatus{{
+			Profile: model.Profile{ID: "codex-a", Tool: model.ToolCodex, Provider: model.ToolCodex},
+			State:   state,
+		}}, nil).Profiles[0]
+	}
+	empty := &model.UsageSnapshot{Primary: &model.UsageWindow{UsedPercent: 100, ResetsAt: &future}, Secondary: &model.UsageWindow{RemainingPercent: 80}}
+	full := &model.UsageSnapshot{Primary: &model.UsageWindow{RemainingPercent: 90}, Secondary: &model.UsageWindow{RemainingPercent: 80}}
+	if !card(model.ProfileState{Usage: empty}).OutOfQuota {
+		t.Fatal("0% 5h window must be out of quota")
+	}
+	if card(model.ProfileState{Usage: full}).OutOfQuota || card(model.ProfileState{}).OutOfQuota {
+		t.Fatal("account with quota or no data yet must not be out of quota")
+	}
+	if !card(model.ProfileState{Usage: full, LastError: "LOGIN EXPIRED"}).OutOfQuota {
+		t.Fatal("failed refresh must count as out of quota")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -27,6 +28,8 @@ type Snapshot struct {
 type ProfileCard struct {
 	ID                  string `json:"id"`
 	Label               string `json:"label"`
+	// OutOfQuota: a 5h or weekly window is at 0%, or its usage failed to refresh.
+	OutOfQuota bool `json:"outOfQuota"`
 	Email               string `json:"email"`
 	Provider            string `json:"provider"`
 	Audience            string `json:"audience"`
@@ -121,6 +124,9 @@ func (a *App) startup(ctx context.Context) {
 	if loadWidgetSettings().Enabled {
 		launchWidget()
 	}
+	if slices.Contains(os.Args[1:], switchNextFlag) { // widget asked while the app was closed
+		go a.SwitchToNextCodex()
+	}
 	go a.runBackgroundLoops()
 }
 
@@ -136,7 +142,12 @@ func (a *App) shutdown(ctx context.Context) {
 	_ = ctx
 }
 
-func (a *App) onSecondInstanceLaunch(_ options.SecondInstanceData) {
+func (a *App) onSecondInstanceLaunch(data options.SecondInstanceData) {
+	// The widget asks for a switch by relaunching the exe with this flag.
+	if slices.Contains(data.Args, switchNextFlag) {
+		go a.SwitchToNextCodex()
+		return
+	}
 	a.restoreFromTray()
 }
 
@@ -553,6 +564,7 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 		}
 		profiles = append(profiles, ProfileCard{
 			ID:                  status.Profile.ID,
+			OutOfQuota:          status.State.LastError != "" || windowEmpty(primary) || windowEmpty(secondary),
 			Label:               profileLabel(status.Profile),
 			Email:               nonEmpty(status.Profile.Email, "-"),
 			Provider:            profileProvider(status.Profile),
@@ -592,6 +604,10 @@ func buildSnapshot(statuses []model.ProfileStatus, svc *service.Service) Snapsho
 		GeneratedAt: now.Format("2006-01-02 15:04:05"),
 		Profiles:    profiles,
 	}
+}
+
+func windowEmpty(window *model.UsageWindow) bool {
+	return window != nil && progressPercent(window) == 0
 }
 
 func progressPercent(window *model.UsageWindow) int {
