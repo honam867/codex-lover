@@ -96,6 +96,8 @@ type App struct {
 	manualHoldProfileID string
 	// lastCandidateRefresh throttles the quota refresh done before an auto-switch.
 	lastCandidateRefresh time.Time
+	// loginLinkCmd is the hidden "copy link" Codex login still waiting, if any.
+	loginLinkCmd *exec.Cmd
 }
 
 func NewApp() *App {
@@ -116,6 +118,9 @@ func NewApp() *App {
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 	a.startTray()
+	if loadWidgetSettings().Enabled {
+		launchWidget()
+	}
 	go a.runBackgroundLoops()
 }
 

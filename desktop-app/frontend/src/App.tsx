@@ -9,6 +9,9 @@ import {
   ChevronDown,
   Cpu,
   FileSpreadsheet,
+  Copy,
+  ExternalLink,
+  Gauge,
   LayoutDashboard,
   Plus,
   RefreshCw,
@@ -40,9 +43,13 @@ import {
   SetAutoRotateCodex,
   SetAutoRotateThreshold,
   SetProfileBlocked,
+  StartCodexLoginLink,
+  ToggleWidget,
   TriggerNow,
   UpdateProfileMeta,
+  WidgetEnabled,
 } from "../wailsjs/go/main/App";
+import { ClipboardSetText } from "../wailsjs/runtime/runtime";
 import clsx from "clsx";
 import { ResetCreditsPanel } from "./ResetCreditsPanel";
 
@@ -197,6 +204,9 @@ function App() {
   const [zoomIndex, setZoomIndex] = useState<number>(1);
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  // Codex login choice: null = provider list, "choose" = copy/open buttons, { url } = link copied.
+  const [codexLogin, setCodexLogin] = useState<null | "choose" | "loading" | { url: string }>(null);
+  const [widgetOn, setWidgetOn] = useState<boolean>(false);
   const [showSettingsModal, setShowSettingsModal] = useState<boolean>(false);
   const [autoRotateEnabled, setAutoRotateEnabled] = useState<boolean>(false);
   const [autoRotateThreshold, setAutoRotateThreshold] = useState<number>(5);
@@ -239,6 +249,7 @@ function App() {
   }, [snapshot.profiles, pricePrompt]);
 
   useEffect(() => {
+    void WidgetEnabled().then(setWidgetOn).catch(() => undefined);
     void loadInitial();
     void loadConfig();
     void loadSystemStatus();
@@ -435,7 +446,7 @@ function App() {
     setSnapshot(result.snapshot);
     setStatusText(result.error ? `ERROR: ${result.error}` : result.message || `CORE_LOADED: ${result.snapshot.generatedAt}`);
     setBusyProfile("");
-    setShowAddModal(false);
+    closeAddModal();
   }
 
   function handleProfileClick(profile: ProfileCard) {
@@ -466,8 +477,31 @@ function App() {
   }
 
   async function onAdd(provider: string) {
+    if (provider === "codex" && codexLogin === null) {
+      setCodexLogin("choose");
+      return;
+    }
+    setCodexLogin(null);
     const result = await AddAccount(provider);
     applyAction(result);
+  }
+
+  async function onCopyCodexLink() {
+    setCodexLogin("loading");
+    const result = await StartCodexLoginLink();
+    if (result.error || !result.url) {
+      setCodexLogin("choose");
+      setStatusText(`ERROR: ${result.error || "no login link"}`);
+      return;
+    }
+    await ClipboardSetText(result.url);
+    setCodexLogin({ url: result.url });
+    setStatusText("LOGIN LINK COPIED");
+  }
+
+  function closeAddModal() {
+    setShowAddModal(false);
+    setCodexLogin(null);
   }
 
   function openEdit(profile: ProfileCard) {
@@ -535,8 +569,11 @@ function App() {
       return true;
     });
 
-    if (!audienceSort && !monthSort && !healthSort && !priceSort) return filtered;
-    return [...filtered].sort((a, b) => compareProfiles(a, b, { audienceSort, monthSort, healthSort, priceSort }));
+    const sorted = !audienceSort && !monthSort && !healthSort && !priceSort
+      ? filtered
+      : [...filtered].sort((a, b) => compareProfiles(a, b, { audienceSort, monthSort, healthSort, priceSort }));
+    // Usable accounts first; stable sort keeps the chosen order inside each group.
+    return [...sorted].sort((a, b) => Number(isOutOfQuota(a)) - Number(isOutOfQuota(b)));
   }, [audienceFilters, audienceSort, healthFilters, healthSort, monthSort, priceSort, providerFilter, providerFilters, shopFilters, snapshot.profiles]);
 
   const codexProfiles = useMemo(
@@ -674,6 +711,13 @@ function App() {
             >
               {exportingExcel ? <RefreshCw size={14} className="loading-spinner" /> : <FileSpreadsheet size={14} />}
               {exportingExcel ? "Đang export..." : "Export Excel"}
+            </button>
+            <button
+              onClick={() => void ToggleWidget().then(setWidgetOn)}
+              className={clsx("cyber-btn flex items-center gap-2", widgetOn && "cyber-btn-solid")}
+              title="Bật/tắt widget quota nổi, luôn nằm trên cùng màn hình"
+            >
+              <Gauge size={14} /> Widget
             </button>
             <button onClick={() => setShowAddModal(true)} className="cyber-btn cyber-btn-solid flex items-center gap-2">
               <Plus size={14} /> New Link
@@ -982,12 +1026,40 @@ function App() {
       </main>
 
       {showAddModal && (
-        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+        <div className="modal-overlay" onClick={closeAddModal}>
           <div className="modal-content" onClick={e => e.stopPropagation()}>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-neon text-lg font-bold">ESTABLISH_UPLINK</h2>
-              <button onClick={() => setShowAddModal(false)}><X size={20} /></button>
+              <button onClick={closeAddModal}><X size={20} /></button>
             </div>
+            {codexLogin !== null ? (
+              <div className="grid grid-cols-1 gap-4">
+                {typeof codexLogin === "object" ? (
+                  <>
+                    <div className="text-xs">Đã copy link đăng nhập Codex. Dán vào tab ẩn danh hoặc trình duyệt bạn muốn. Đăng nhập xong acc sẽ tự xuất hiện.</div>
+                    <div className="text-[10px] text-dim break-all p-2 border border-[rgba(0,243,255,0.2)] max-h-24 overflow-auto select-all">{codexLogin.url}</div>
+                    <div className="text-[10px] text-dim">Trình duyệt mặc định có thể tự mở thêm 1 tab, đóng nó đi nếu bạn dùng tab khác.</div>
+                    <button onClick={() => void ClipboardSetText(codexLogin.url)} className="cyber-btn flex items-center justify-center gap-2 py-3">
+                      <Copy size={14} /> COPY LẠI
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      onClick={() => void onCopyCodexLink()}
+                      disabled={codexLogin === "loading"}
+                      className="cyber-btn flex items-center justify-center gap-2 py-4"
+                    >
+                      {codexLogin === "loading" ? <RefreshCw size={14} className="loading-spinner" /> : <Copy size={14} />}
+                      {codexLogin === "loading" ? "ĐANG LẤY LINK..." : "COPY LINK"}
+                    </button>
+                    <button onClick={() => void onAdd("codex")} className="cyber-btn flex items-center justify-center gap-2 py-4">
+                      <ExternalLink size={14} /> MỞ TRÌNH DUYỆT HIỆN TẠI
+                    </button>
+                  </>
+                )}
+              </div>
+            ) : (
             <div className="grid grid-cols-1 gap-4">
               {['codex', 'claude', 'kimi'].map(p => (
                 <button 
@@ -1003,6 +1075,7 @@ function App() {
                 </button>
               ))}
             </div>
+            )}
           </div>
         </div>
       )}
@@ -1640,6 +1713,13 @@ const normalizeHealth = (value: string): HealthFilter => {
 
 const audienceLabel = (value: AudienceValue): string =>
   value === "customer" ? "Khách hàng" : "Cá nhân";
+
+// Out of quota (5h or weekly at 0%) or failing to refresh: listed after usable accounts.
+const isOutOfQuota = (profile: ProfileCard): boolean => {
+  if (profile.lastError && profile.lastError !== "-") return true;
+  const empty = (percent: number, summary: string) => Boolean(summary) && summary !== "-" && percent <= 0;
+  return empty(profile.primaryPercent, profile.primarySummary) || empty(profile.secondaryPercent, profile.secondarySummary);
+};
 
 const healthLabel = (value: HealthFilter): string => {
   switch (value) {

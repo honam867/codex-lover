@@ -6,8 +6,13 @@ import (
 	"encoding/base64"
 	"os/exec"
 	"strings"
+	"syscall"
 	"unicode/utf16"
 )
+
+// createNoWindow keeps PowerShell from flashing a console window: launched
+// from the GUI app it would otherwise get a new visible console.
+const createNoWindow = 0x08000000
 
 func send(event Event) error {
 	script := buildWindowsNotifyScript(event)
@@ -20,6 +25,7 @@ func send(event Event) error {
 		"-ExecutionPolicy", "Bypass",
 		"-EncodedCommand", encoded,
 	)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: createNoWindow}
 	if err := cmd.Start(); err != nil {
 		return err
 	}

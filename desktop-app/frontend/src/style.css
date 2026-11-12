@@ -1569,3 +1569,7 @@ select:focus, input:focus {
   background: var(--bg-deep);
   color: var(--neon-cyan);
 }
+
+/* Floating quota widget: no scanline overlay or flicker on the transparent window. */
+body.widget-mode::before { display: none; }
+body.widget-mode #root { animation: none; }
