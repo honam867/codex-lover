@@ -20,6 +20,8 @@ const (
 	TriggerStatusSkippedNoAuth = "skipped_no_auth"
 	TriggerStatusNotEligible   = "not_eligible"
 	TriggerStatusError         = "error"
+	TriggerStatusPending       = "pending" // queued in a running manual trigger
+	TriggerStatusRunning       = "running"
 
 	HealthStatusUnknown = "unknown"
 	HealthStatusOK      = "ok"

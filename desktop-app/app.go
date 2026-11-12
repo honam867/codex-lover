@@ -908,7 +908,12 @@ func (a *App) TriggerNow() ActionResponse {
 		a.mu.Unlock()
 		return ActionResponse{Message: "Trigger failed", Error: err.Error(), Snapshot: a.mustSnapshotFallback()}
 	}
-	run, runErr := a.svc.RunTrigger(statuses, cfg.Trigger, true)
+	// Stream each account's state so the settings panel can show who is done.
+	run, runErr := a.svc.RunTrigger(statuses, cfg.Trigger, true, func(progress model.TriggerRun) {
+		if a.ctx != nil {
+			wailsruntime.EventsEmit(a.ctx, "trigger:progress", progress)
+		}
+	})
 	a.mu.Unlock()
 
 	opened := 0

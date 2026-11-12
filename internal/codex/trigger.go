@@ -9,70 +9,20 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"sort"
 	"strings"
 	"time"
 )
 
 var (
 	responsesURL = "https://chatgpt.com/backend-api/codex/responses"
-	modelsURL    = "https://chatgpt.com/backend-api/codex/models?client_version=0.160.1"
 
-	// DefaultTriggerModels is only the fallback when the server's model list
-	// cannot be read. OpenAI renames ChatGPT-account Codex models often (from
-	// 2026-11 gpt-5.5 and gpt-5.4 return 400 model_not_found), so the live list
-	// from modelsURL is used whenever possible.
-	DefaultTriggerModels = []string{"gpt-5.6-luna", "gpt-6-luna"}
+	// DefaultTriggerModels: the model used to open a 5h window and for health
+	// probes. From 2026-11 OpenAI rejects gpt-5.5/gpt-5.4 for ChatGPT-account
+	// Codex (400 model_not_found); gpt-5.6-luna is the smallest accepted one.
+	// One model only: a fallback would turn a 429 (limited) into a later
+	// model's error and mark the account Dead.
+	DefaultTriggerModels = []string{"gpt-5.6-luna"}
 )
-
-// TriggerModels returns the models this account may use on /responses, lowest
-// priority (smallest) first, or DefaultTriggerModels if the list is unavailable.
-func TriggerModels(accessToken string, accountID string) []string {
-	req, err := http.NewRequest(http.MethodGet, modelsURL, nil)
-	if err != nil {
-		return DefaultTriggerModels
-	}
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("User-Agent", defaultUserAgent)
-	req.Header.Set("originator", "codex_cli_rs")
-	if accountID != "" {
-		req.Header.Set("chatgpt-account-id", accountID)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return DefaultTriggerModels
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return DefaultTriggerModels
-	}
-	var payload struct {
-		Models []struct {
-			Slug           string `json:"slug"`
-			Visibility     string `json:"visibility"`
-			SupportedInAPI bool   `json:"supported_in_api"`
-			Priority       int    `json:"priority"`
-		} `json:"models"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
-		return DefaultTriggerModels
-	}
-	listed := payload.Models[:0]
-	for _, m := range payload.Models {
-		if m.Slug != "" && m.Visibility == "list" && m.SupportedInAPI {
-			listed = append(listed, m)
-		}
-	}
-	if len(listed) == 0 {
-		return DefaultTriggerModels
-	}
-	sort.SliceStable(listed, func(i, j int) bool { return listed[i].Priority > listed[j].Priority })
-	models := make([]string, 0, len(listed))
-	for _, m := range listed {
-		models = append(models, m.Slug)
-	}
-	return models
-}
 
 // TriggerResult reports the outcome of a successful trigger.
 type TriggerResult struct {
@@ -106,17 +56,13 @@ func (e *TriggerError) Unwrap() error {
 
 // TriggerWindow sends one minimal request so the account's 5h quota window
 // opens. It tries models in order until one is accepted, and refreshes the
-// token once on 401. With no models given it asks the server which ones the
-// account may use. On refresh it returns a non-nil *AuthFile the caller must
+// token once on 401. On refresh it returns a non-nil *AuthFile the caller must
 // persist. The active account is never touched.
 func TriggerWindow(auth *ProfileAuth, models []string) (*TriggerResult, *AuthFile, error) {
-	pick := func(accessToken, accountID string) []string {
-		if len(models) > 0 {
-			return models
-		}
-		return TriggerModels(accessToken, accountID)
+	if len(models) == 0 {
+		models = DefaultTriggerModels
 	}
-	result, status, err := doTriggerOnce(auth.AccessToken, auth.AccountID, pick(auth.AccessToken, auth.AccountID))
+	result, status, err := doTriggerOnce(auth.AccessToken, auth.AccountID, models)
 	if err == nil {
 		return result, nil, nil
 	}
@@ -141,7 +87,7 @@ func TriggerWindow(auth *ProfileAuth, models []string) (*TriggerResult, *AuthFil
 		},
 		LastRefresh: ptrTime(time.Now().UTC()),
 	}
-	result, _, err = doTriggerOnce(refreshed.AccessToken, refreshed.AccountID, pick(refreshed.AccessToken, refreshed.AccountID))
+	result, _, err = doTriggerOnce(refreshed.AccessToken, refreshed.AccountID, models)
 	if err != nil {
 		// The refresh succeeded and may have rotated the refresh token; return the
 		// new tokens so the caller persists them even though the trigger failed.
@@ -150,10 +96,8 @@ func TriggerWindow(auth *ProfileAuth, models []string) (*TriggerResult, *AuthFil
 	return result, refreshedFile, nil
 }
 
-// TriggerHealthProbe deliberately uses a single model: a fallback would turn a
-// 429 (limited) into a later model's error and mark the account Dead.
 func TriggerHealthProbe(auth *ProfileAuth) (*TriggerResult, *AuthFile, error) {
-	return TriggerWindow(auth, TriggerModels(auth.AccessToken, auth.AccountID)[:1])
+	return TriggerWindow(auth, DefaultTriggerModels)
 }
 
 func doTriggerOnce(accessToken string, accountID string, models []string) (*TriggerResult, int, error) {

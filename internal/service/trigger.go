@@ -15,16 +15,40 @@ func (s *Service) cachedSourceFunc(profiles []model.Profile) func(model.Profile)
 
 // RunTrigger selects and triggers the configured Codex accounts, persists the
 // run to state, and returns the run summary. It never switches the active account.
-func (s *Service) RunTrigger(statuses []model.ProfileStatus, cfg model.TriggerConfig, manual bool) (model.TriggerRun, error) {
+// onProgress (may be nil) receives the run so far: once with every selected
+// account pending, then before and after each account is triggered.
+func (s *Service) RunTrigger(statuses []model.ProfileStatus, cfg model.TriggerConfig, manual bool, onProgress func(model.TriggerRun)) (model.TriggerRun, error) {
 	profiles := statusesToProfiles(statuses)
 	selected, skipped := selectTriggerTargets(statuses, cfg, s.cachedSourceFunc(profiles))
 
 	run := model.TriggerRun{RanAt: time.Now().UTC(), Manual: manual}
 	for _, t := range selected {
-		res := model.TriggerAccountResult{
+		run.Results = append(run.Results, model.TriggerAccountResult{
 			ProfileID: t.Status.Profile.ID,
 			Label:     profileLabel(t.Status.Profile),
+			Status:    model.TriggerStatusPending,
+		})
+	}
+	for _, sk := range skipped {
+		run.Results = append(run.Results, model.TriggerAccountResult{
+			ProfileID: sk.Status.Profile.ID,
+			Label:     profileLabel(sk.Status.Profile),
+			Status:    sk.Reason,
+		})
+	}
+	report := func() {
+		if onProgress != nil {
+			snapshot := run
+			snapshot.Results = append([]model.TriggerAccountResult(nil), run.Results...)
+			onProgress(snapshot)
 		}
+	}
+	report()
+
+	for i, t := range selected {
+		res := &run.Results[i]
+		res.Status = model.TriggerStatusRunning
+		report()
 		result, err := codex.TriggerFromCachedAuth(s.codexAuthCacheRoot(), t.SourceProfileID, nil)
 		if err != nil {
 			res.Status = model.TriggerStatusError
@@ -34,14 +58,7 @@ func (s *Service) RunTrigger(statuses []model.ProfileStatus, cfg model.TriggerCo
 			res.ModelUsed = result.ModelUsed
 			res.Verified = s.verifyTriggerOpened(t.SourceProfileID)
 		}
-		run.Results = append(run.Results, res)
-	}
-	for _, sk := range skipped {
-		run.Results = append(run.Results, model.TriggerAccountResult{
-			ProfileID: sk.Status.Profile.ID,
-			Label:     profileLabel(sk.Status.Profile),
-			Status:    sk.Reason,
-		})
+		report()
 	}
 
 	if err := s.persistLastTriggerRun(run); err != nil {
@@ -111,7 +128,7 @@ func (s *Service) RunScheduledTrigger(now time.Time, statuses []model.ProfileSta
 	if err := s.store.SaveState(state); err != nil {
 		return false, model.TriggerRun{}, err
 	}
-	run, err := s.RunTrigger(statuses, cfg.Trigger, false)
+	run, err := s.RunTrigger(statuses, cfg.Trigger, false, nil)
 	return true, run, err
 }
 

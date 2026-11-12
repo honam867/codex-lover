@@ -86,17 +86,6 @@ func TestTriggerHealthProbeUsesSingleSupportedModel(t *testing.T) {
 	old := responsesURL
 	responsesURL = server.URL
 	defer func() { responsesURL = old }()
-	modelsServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte(`{"models":[
-			{"slug":"big","visibility":"list","supported_in_api":true,"priority":1},
-			{"slug":"hidden","visibility":"hide","supported_in_api":true,"priority":9},
-			{"slug":"small","visibility":"list","supported_in_api":true,"priority":5}]}`))
-	}))
-	defer modelsServer.Close()
-	oldModels := modelsURL
-	modelsURL = modelsServer.URL
-	defer func() { modelsURL = oldModels }()
-
 	auth := &ProfileAuth{AccessToken: "tok", AccountID: "a"}
 	_, _, err := TriggerHealthProbe(auth)
 	if err == nil {
@@ -106,9 +95,8 @@ func TestTriggerHealthProbeUsesSingleSupportedModel(t *testing.T) {
 	if len(seenModels) != 1 {
 		t.Fatalf("health probe tried %d models (%v), want exactly 1", len(seenModels), seenModels)
 	}
-	// The server's list decides the model: smallest listed one, hidden ones skipped.
-	if seenModels[0] != "small" {
-		t.Fatalf("health probe model = %q, want small", seenModels[0])
+	if seenModels[0] != "gpt-5.6-luna" {
+		t.Fatalf("health probe model = %q, want gpt-5.6-luna", seenModels[0])
 	}
 }
 

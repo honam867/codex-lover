@@ -49,7 +49,7 @@ import {
   UpdateProfileMeta,
   WidgetEnabled,
 } from "../wailsjs/go/main/App";
-import { ClipboardSetText } from "../wailsjs/runtime/runtime";
+import { ClipboardSetText, EventsOn } from "../wailsjs/runtime/runtime";
 import clsx from "clsx";
 import { ResetCreditsPanel } from "./ResetCreditsPanel";
 
@@ -214,6 +214,7 @@ function App() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus>({ hasCodexCli: true, codexInstallUrl: "https://github.com/openai/codex" });
   const [trigger, setTrigger] = useState<TriggerConfig>(DEFAULT_TRIGGER);
   const [lastRun, setLastRun] = useState<TriggerRun | null>(null);
+  const [triggering, setTriggering] = useState(false);
   const [topNPreview, setTopNPreview] = useState<string[]>([]);
   const [deletionHistory, setDeletionHistory] = useState<DeletedAccountRecord[]>([]);
   const [showDeletionLog, setShowDeletionLog] = useState<boolean>(false);
@@ -365,7 +366,11 @@ function App() {
   }
 
   async function onTriggerNow() {
+    if (triggering) return;
+    setTriggering(true);
     setStatusText("TRIGGERING...");
+    // The backend streams the run as each account starts and finishes.
+    const stop = EventsOn("trigger:progress", (run: TriggerRun) => setLastRun(run));
     try {
       const result = await TriggerNow();
       applyAction(result);
@@ -373,6 +378,9 @@ function App() {
       setLastRun(run);
     } catch {
       setStatusText("ERROR: TRIGGER FAILED");
+    } finally {
+      stop();
+      setTriggering(false);
     }
   }
 
@@ -1273,20 +1281,42 @@ function App() {
                       </div>
                     )}
 
-                    <button onClick={() => void onTriggerNow()} className="cyber-btn cyber-btn-solid w-full flex items-center justify-center gap-2">
-                      <Activity size={14} /> TRIGGER NOW
+                    <button
+                      onClick={() => void onTriggerNow()}
+                      disabled={triggering}
+                      className={clsx("cyber-btn cyber-btn-solid w-full flex items-center justify-center gap-2", triggering && "cyber-btn-loading")}
+                    >
+                      {triggering ? <RefreshCw size={14} className="loading-spinner" /> : <Activity size={14} />}
+                      {triggering
+                        ? `ĐANG TRIGGER ${lastRun?.results.filter((r) => r.status === "opened" || r.status === "error").length ?? 0}/${lastRun?.results.filter((r) => ["pending", "running", "opened", "error"].includes(r.status)).length ?? 0}`
+                        : "TRIGGER NOW"}
                     </button>
 
                     {lastRun && (
                       <div className="trigger-lastrun">
                         <div className="text-[10px] text-dim mb-1">
-                          LAST_RUN {new Date(lastRun.ran_at).toLocaleString()}
+                          {triggering ? "RUNNING" : "LAST_RUN"} {new Date(lastRun.ran_at).toLocaleString()}
                         </div>
                         {lastRun.results.map((r) => (
-                          <div key={r.profile_id} className="trigger-lastrun-row">
-                            <span>{r.status === "opened" ? "✓" : r.status === "error" ? "✗" : "•"} {r.label}</span>
-                            <span className="text-dim">
-                              {r.status === "opened" ? (r.model_used || "opened") : r.status.replace("_", " ")}
+                          <div key={r.profile_id} className={clsx("trigger-lastrun-row", r.status === "running" && "text-neon")}>
+                            <span className="flex items-center gap-1">
+                              {r.status === "running" ? (
+                                <RefreshCw size={10} className="loading-spinner" />
+                              ) : (
+                                <span>{r.status === "opened" ? "✓" : r.status === "error" ? "✗" : r.status === "pending" ? "…" : "•"}</span>
+                              )}
+                              {r.label}
+                            </span>
+                            <span className={r.status === "error" ? "text-red-400" : "text-dim"} title={r.error || ""}>
+                              {r.status === "opened"
+                                ? (r.model_used || "opened")
+                                : r.status === "running"
+                                  ? "đang chạy"
+                                  : r.status === "pending"
+                                    ? "chờ"
+                                    : r.status === "error"
+                                      ? "lỗi (rê chuột xem)"
+                                      : r.status.replace("_", " ")}
                             </span>
                           </div>
                         ))}
