@@ -180,7 +180,7 @@ func runTriggerProbe(args []string) error {
 	}
 
 	fmt.Printf("Probing trigger for active account: %s\n", emptyDash(auth.Email))
-	result, refreshed, err := codex.TriggerWindow(auth, codex.DefaultTriggerModels)
+	result, refreshed, err := codex.TriggerWindow(auth, nil)
 	if err != nil {
 		return fmt.Errorf("trigger failed: %w", err)
 	}

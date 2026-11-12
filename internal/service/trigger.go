@@ -25,7 +25,7 @@ func (s *Service) RunTrigger(statuses []model.ProfileStatus, cfg model.TriggerCo
 			ProfileID: t.Status.Profile.ID,
 			Label:     profileLabel(t.Status.Profile),
 		}
-		result, err := codex.TriggerFromCachedAuth(s.codexAuthCacheRoot(), t.SourceProfileID, codex.DefaultTriggerModels)
+		result, err := codex.TriggerFromCachedAuth(s.codexAuthCacheRoot(), t.SourceProfileID, nil)
 		if err != nil {
 			res.Status = model.TriggerStatusError
 			res.Error = err.Error()
