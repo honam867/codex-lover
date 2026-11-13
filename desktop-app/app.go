@@ -320,6 +320,11 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 	// Deleting the active Codex account logs Codex out; log in the account
 	// with the most quota left instead of leaving it to a manual pick.
 	if err == nil && result.RemovedHomeAuth && result.Profile.Tool == model.ToolCodex {
+		// Fresh plan and quota first, so the pick is not an account that is
+		// already out or dropped to free.
+		if statuses, statusErr := a.svc.ProfileStatuses(); statusErr == nil {
+			_, _, _ = a.svc.RefreshLoggedOutCachedUsage(statuses)
+		}
 		if switched, switchErr := a.svc.ActivateBestCodexAfter(result.Profile); switchErr == nil && switched.Changed {
 			message += " · switched to " + profileLabel(switched.To)
 			a.manualHoldProfileID = ""

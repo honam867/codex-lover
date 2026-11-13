@@ -185,6 +185,13 @@ func (a *App) refreshLoggedOutLocked() error {
 // (Codex rejects their models) and, if the active one went, logs in the account
 // with the most quota left. Reports whether anything was removed.
 func (a *App) removeFreeCodexLocked(statuses []model.ProfileStatus) bool {
+	// The replacement is picked from the other accounts' plan and quota; with
+	// stale data it could land on one that also dropped to free and hop again.
+	if service.ActiveCodexIsFree(statuses) {
+		if fresh, _, err := a.svc.RefreshLoggedOutCachedUsage(statuses); err == nil {
+			statuses = fresh
+		}
+	}
 	out, _ := a.svc.RemoveFreeCodexAccounts(statuses)
 	if len(out.Removed) == 0 {
 		return false

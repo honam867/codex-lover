@@ -16,6 +16,12 @@ func isFreeCodexPlan(status model.ProfileStatus) bool {
 		strings.EqualFold(strings.TrimSpace(status.State.Usage.PlanType), "free")
 }
 
+// ActiveCodexIsFree reports whether the active Codex account dropped to free.
+func ActiveCodexIsFree(statuses []model.ProfileStatus) bool {
+	active, ok := activeCodexStatus(statuses)
+	return ok && isFreeCodexPlan(active)
+}
+
 // FreeCodexCleanup is what RemoveFreeCodexAccounts did.
 type FreeCodexCleanup struct {
 	Removed  []model.Profile
