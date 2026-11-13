@@ -78,7 +78,10 @@ func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.Refr
 	cfg, _ := a.svc.LoadConfig()
 	autoRotate := cfg.AutoRotateCodex
 
-	activeID, activeLimited := service.ActiveCodexLimitState(statuses)
+	// Switch while a little quota is left (SWITCH_THRESHOLD in settings), so
+	// OpenCode/Codex requests move to the next account before they fail.
+	threshold := cfg.AutoRotateThreshold
+	activeID, activeLimited := service.ActiveCodexLimitState(statuses, threshold)
 	holdActive, nextHold := manualHoldDecision(activeID, activeLimited, a.manualHoldProfileID)
 	a.manualHoldProfileID = nextHold
 
@@ -91,7 +94,7 @@ func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.Refr
 				statuses = fresh
 			}
 		}
-		switchResult, err := a.svc.AutoSwitchLimitedCodex(statuses)
+		switchResult, err := a.svc.AutoSwitchLimitedCodex(statuses, threshold)
 		if err == nil && switchResult.Changed {
 			if emitNotifications {
 				_ = notify.New().Send(notify.Event{

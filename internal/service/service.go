@@ -940,15 +940,33 @@ func weeklyRemaining(status model.ProfileStatus) float64 {
 	return 0
 }
 
-func (s *Service) AutoSwitchLimitedCodex(statuses []model.ProfileStatus) (SwitchResult, error) {
+// AutoSwitchLimitedCodex switches away from the active Codex account once its
+// 5h or weekly quota is at or below thresholdPercent, so requests (OpenCode,
+// Codex) are moved before they start failing. The new account must have more
+// than the threshold left, or two low accounts would swap back and forth; only
+// once the active one is fully exhausted will any account with quota do. With
+// no candidate the active account is kept, and the next refresh tries again,
+// so it moves as soon as some account's quota comes back.
+func (s *Service) AutoSwitchLimitedCodex(statuses []model.ProfileStatus, thresholdPercent float64) (SwitchResult, error) {
 	active, ok := activeCodexStatus(statuses)
 	if !ok {
 		return SwitchResult{Checked: true, Reason: "no active Codex account"}, nil
 	}
-	if !usageLimitReached(active) {
+	if !usageAtOrBelow(active, thresholdPercent) {
 		return SwitchResult{Checked: true, From: active.Profile, Reason: "active account still has quota"}, nil
 	}
-	return s.SwitchToBestCodex(statuses)
+	minScore := thresholdPercent
+	if usageLimitReached(active) {
+		minScore = 0
+	}
+	candidate, ok := s.bestSwitchCandidateAbove(statuses, active, minScore)
+	if !ok {
+		return SwitchResult{Checked: true, From: active.Profile, Reason: "no account with quota left; keeping the active one"}, nil
+	}
+	if err := codex.RestoreCachedHomeAuth(s.codexAuthCacheRoot(), candidate.Profile.ID, active.Profile.HomePath); err != nil {
+		return SwitchResult{Checked: true, From: active.Profile, To: candidate.Profile}, err
+	}
+	return SwitchResult{Checked: true, Changed: true, From: active.Profile, To: candidate.Profile, Reason: "active account near its limit"}, nil
 }
 
 // SwitchToBestCodex switches the active Codex home to the account with the most
@@ -975,6 +993,12 @@ func (s *Service) SwitchToBestCodex(statuses []model.ProfileStatus) (SwitchResul
 }
 
 func (s *Service) bestSwitchCandidate(statuses []model.ProfileStatus, active model.ProfileStatus) (model.ProfileStatus, bool) {
+	return s.bestSwitchCandidateAbove(statuses, active, 0)
+}
+
+// bestSwitchCandidateAbove is bestSwitchCandidate limited to accounts with more
+// than minScore percent left in both windows.
+func (s *Service) bestSwitchCandidateAbove(statuses []model.ProfileStatus, active model.ProfileStatus, minScore float64) (model.ProfileStatus, bool) {
 	now := time.Now()
 	var best model.ProfileStatus
 	var bestScore float64
@@ -993,7 +1017,7 @@ func (s *Service) bestSwitchCandidate(statuses []model.ProfileStatus, active mod
 			continue
 		}
 		score, ok := quotaScore(status, now)
-		if !ok {
+		if !ok || score <= minScore {
 			continue
 		}
 		if !found || score > bestScore {
@@ -1671,13 +1695,26 @@ func activeCodexStatus(statuses []model.ProfileStatus) (model.ProfileStatus, boo
 }
 
 // ActiveCodexLimitState returns the active Codex profile ID ("" if none) and
-// whether it has reached its quota limit.
-func ActiveCodexLimitState(statuses []model.ProfileStatus) (string, bool) {
+// whether its 5h or weekly quota is at or below thresholdPercent.
+func ActiveCodexLimitState(statuses []model.ProfileStatus, thresholdPercent float64) (string, bool) {
 	active, ok := activeCodexStatus(statuses)
 	if !ok {
 		return "", false
 	}
-	return active.Profile.ID, usageLimitReached(active)
+	return active.Profile.ID, usageAtOrBelow(active, thresholdPercent)
+}
+
+// usageAtOrBelow reports a 5h or weekly window at or below percent remaining
+// (never below the 0.5% "reached" line).
+func usageAtOrBelow(status model.ProfileStatus, percent float64) bool {
+	if status.State.Usage == nil {
+		return false
+	}
+	if percent < 0.5 {
+		percent = 0.5
+	}
+	low := func(w *model.UsageWindow) bool { return w != nil && w.RemainingPercent <= percent }
+	return low(status.State.Usage.Primary) || low(status.State.Usage.Secondary)
 }
 
 func usageLimitReached(status model.ProfileStatus) bool {

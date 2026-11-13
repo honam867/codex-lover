@@ -1147,6 +1147,9 @@ function App() {
                   <span>10%</span>
                   <span>20%</span>
                 </div>
+                <div className="text-[10px] text-dim mt-2">
+                  Tự chuyển acc khi 5H hoặc Weekly của acc đang active còn ≤ {autoRotateThreshold}%, trước khi OpenCode/Codex báo hết quota. Hết sạch mọi acc thì giữ nguyên, acc nào hồi quota sẽ tự chuyển sang.
+                </div>
               </div>
 
               <div className="bg-[rgba(0,243,255,0.05)] p-4 border border-[rgba(0,243,255,0.1)] space-y-4">
