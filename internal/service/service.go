@@ -983,6 +983,9 @@ func (s *Service) bestSwitchCandidate(statuses []model.ProfileStatus, active mod
 		if status.Profile.Tool != model.ToolCodex || status.Profile.ID == active.Profile.ID || status.Profile.Blocked {
 			continue
 		}
+		if isFreeCodexPlan(status) { // free plan cannot use Codex models
+			continue
+		}
 		if status.Profile.HomePath != active.Profile.HomePath {
 			continue
 		}

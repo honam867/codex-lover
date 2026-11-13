@@ -316,6 +316,15 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 	}
 	a.mu.Lock()
 	result, err := a.svc.LogoutProfile(profileID)
+	message := "Deleted " + profileLabel(result.Profile)
+	// Deleting the active Codex account logs Codex out; log in the account
+	// with the most quota left instead of leaving it to a manual pick.
+	if err == nil && result.RemovedHomeAuth && result.Profile.Tool == model.ToolCodex {
+		if switched, switchErr := a.svc.ActivateBestCodexAfter(result.Profile); switchErr == nil && switched.Changed {
+			message += " · switched to " + profileLabel(switched.To)
+			a.manualHoldProfileID = ""
+		}
+	}
 	a.mu.Unlock()
 	if err != nil {
 		return ActionResponse{
@@ -327,13 +336,13 @@ func (a *App) LogoutProfile(profileID string) ActionResponse {
 	snapshot, err := a.snapshot(true)
 	if err != nil {
 		return ActionResponse{
-			Message:  "Deleted " + profileLabel(result.Profile),
+			Message:  message,
 			Error:    err.Error(),
 			Snapshot: a.mustSnapshotFallback(),
 		}
 	}
 	return ActionResponse{
-		Message:  "Deleted " + profileLabel(result.Profile),
+		Message:  message,
 		Snapshot: snapshot,
 	}
 }

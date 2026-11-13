@@ -68,6 +68,13 @@ func (a *App) refreshLockedWithOptions(emitNotifications bool, opts service.Refr
 		}
 	}
 
+	if a.removeFreeCodexLocked(statuses) {
+		statuses, err = a.svc.RefreshAllWithOptions(opts)
+		if err != nil {
+			return Snapshot{}, err
+		}
+	}
+
 	cfg, _ := a.svc.LoadConfig()
 	autoRotate := cfg.AutoRotateCodex
 
@@ -162,11 +169,37 @@ func (a *App) refreshLoggedOutLocked() error {
 	if err != nil {
 		return err
 	}
+	if a.removeFreeCodexLocked(statuses) {
+		if statuses, err = a.svc.ProfileStatuses(); err != nil {
+			return err
+		}
+	}
 	a.lastSnapshot = buildSnapshot(statuses, a.svc)
 	if a.tray != nil {
 		a.tray.Update(a.lastSnapshot)
 	}
 	return nil
+}
+
+// removeFreeCodexLocked deletes Codex accounts that dropped from Plus to free
+// (Codex rejects their models) and, if the active one went, logs in the account
+// with the most quota left. Reports whether anything was removed.
+func (a *App) removeFreeCodexLocked(statuses []model.ProfileStatus) bool {
+	out, _ := a.svc.RemoveFreeCodexAccounts(statuses)
+	if len(out.Removed) == 0 {
+		return false
+	}
+	labels := make([]string, 0, len(out.Removed))
+	for _, profile := range out.Removed {
+		labels = append(labels, profileLabel(profile))
+	}
+	message := fmt.Sprintf("Da xoa %d acc rot Plus: %s", len(out.Removed), strings.Join(labels, ", "))
+	if out.Switched.Changed {
+		message += ". Da chuyen sang " + profileLabel(out.Switched.To)
+		a.manualHoldProfileID = ""
+	}
+	_ = notify.New().Send(notify.Event{Title: "Codex account removed", Message: message, Level: notify.LevelWarning})
+	return true
 }
 
 func (a *App) syncOpenCodeLocked(statuses []model.ProfileStatus) error {
